@@ -7,6 +7,8 @@ from dotenv import load_dotenv
 
 from weekly_avg import RenphoScalesData
 
+from constants import goal_weight, starting_weight
+
 
 load_dotenv()
 
@@ -39,6 +41,10 @@ async def main():
 
     if weight_now is not None and weight_prev is not None:
         lines.append(f"Weight: {format_change(weight_now, weight_prev, 'kg')}")
+        cumulative_change = weight_now - starting_weight
+        target_change_since_start = goal_weight - starting_weight
+        proportion_of_goal = (cumulative_change / target_change_since_start) * 100 if target_change_since_start != 0 else 0
+        lines.append(f"Cumulative change since start: {cumulative_change:.2f}kg ({proportion_of_goal:.1f}% of the way to goal)")
     else:
         lines.append("Weight: insufficient Renpho data")
 
