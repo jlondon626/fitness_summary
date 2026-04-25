@@ -2,8 +2,7 @@ name: Weekly fitness summary
 
 on:
   schedule:
-    - cron: "30 6 * * 5"
-      timezone: "Europe/London"
+    - cron: "30 5 * * 5"
   workflow_dispatch:
 
 jobs:
