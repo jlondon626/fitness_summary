@@ -9,7 +9,6 @@ from weekly_avg import RenphoScalesData
 
 from constants import goal_weight, starting_weight
 
-
 load_dotenv()
 
 EMAIL = os.getenv("MY_EMAIL")
