@@ -1,6 +1,9 @@
 name: Weekly fitness summary
 
 on:
+  push:
+    branches:
+      - main
   schedule:
     - cron: "30 5 * * 5"
   workflow_dispatch:
