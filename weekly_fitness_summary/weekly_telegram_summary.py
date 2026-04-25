@@ -35,6 +35,7 @@ async def main():
     bf_prev = renpho_data.get_rolling_weekly_avg(last_week, "bodyfat")
 
     lines = ["Weekly fitness summary"]
+    lines.append(f"Date: {today.strftime('%d/%m/%Y')}")
 
     if weight_now is not None and weight_prev is not None:
         lines.append(f"Weight: {format_change(weight_now, weight_prev, 'kg')}")
