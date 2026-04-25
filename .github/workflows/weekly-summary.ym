@@ -1,0 +1,31 @@
+name: Weekly fitness summary
+
+on:
+  schedule:
+    - cron: "30 6 * * 5"
+      timezone: "Europe/London"
+  workflow_dispatch:
+
+jobs:
+  send-summary:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repo
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Send weekly Telegram summary
+        env:
+          MY_EMAIL: ${{ secrets.MY_EMAIL }}
+          MY_PASSWORD: ${{ secrets.MY_PASSWORD }}
+          FITNESS_SUMMARY_BOT_TOKEN: ${{ secrets.FITNESS_SUMMARY_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python weekly_telegram_summary.py
