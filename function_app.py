@@ -7,7 +7,7 @@ app = func.FunctionApp()
 
 @app.function_name(name="weekly_fitness_summary")
 @app.timer_trigger(
-    schedule="0 */5 * * * *",  # Every 5 minutes
+    schedule="30 7 * * * SUN",  # Every Sunday at 7:30 AM
     arg_name="mytimer",
     run_on_startup=False,
     use_monitor=True,
