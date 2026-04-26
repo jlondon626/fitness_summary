@@ -4,6 +4,7 @@ import webbrowser
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl
+from dateutil.relativedelta import relativedelta
 
 import requests
 from dotenv import load_dotenv
@@ -133,7 +134,7 @@ def get_food_diary_entries(entry_date: date) -> dict:
     response.raise_for_status()
     return response.json()
 
-def get_food_diary_entries_between_dates(from_date: date) -> dict:
+def get_food_diary_entries_for_month(from_date: date) -> dict:
     days_since_epoch_from = (from_date - date(1970, 1, 1)).days
     oauth = _diary_oauth_session()
 
@@ -153,8 +154,8 @@ if __name__ == "__main__":
     if not DIARY_ACCESS_TOKEN or not DIARY_ACCESS_SECRET:
         get_diary_authorization_tokens()
     else:
-        diary_entries_current_month = get_food_diary_entries_between_dates(date.today())
-        diary_entries_previous_month = get_food_diary_entries_between_dates(date.today() - timedelta(month=1))
+        diary_entries_current_month = get_food_diary_entries_for_month(date.today())
+        diary_entries_previous_month = get_food_diary_entries_for_month(date.today() - relativedelta(months=1))
         diary_entries_combined = [diary_entries_current_month, diary_entries_previous_month]
 
         with open("diary_entries.json", "w") as f:
