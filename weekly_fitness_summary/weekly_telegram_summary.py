@@ -5,9 +5,12 @@ from datetime import datetime, timedelta
 import telegram
 from dotenv import load_dotenv
 
-from weekly_avg import RenphoScalesData
-
-from constants import goal_weight, starting_weight
+try:
+    from .weekly_avg import RenphoScalesData
+    from .constants import goal_weight, starting_weight
+except ImportError:
+    from weekly_avg import RenphoScalesData
+    from constants import goal_weight, starting_weight
 
 load_dotenv()
 
