@@ -14,10 +14,6 @@ except ImportError:
 
 load_dotenv()
 
-EMAIL = os.getenv("MY_EMAIL")
-PASSWORD = os.getenv("MY_PASSWORD")
-BOT_TOKEN = os.getenv("FITNESS_SUMMARY_BOT_TOKEN")
-CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
 
 def format_change(current, previous, units):
@@ -27,8 +23,12 @@ def format_change(current, previous, units):
 
 
 async def main():
-    renpho_data = RenphoScalesData(EMAIL, PASSWORD)
+    EMAIL = os.getenv("MY_EMAIL")
+    PASSWORD = os.getenv("MY_PASSWORD")
+    BOT_TOKEN = os.getenv("FITNESS_SUMMARY_BOT_TOKEN")
+    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
+    renpho_data = RenphoScalesData(EMAIL, PASSWORD)
     
     today = datetime.now().date()
     yesterday = datetime.now().date() - timedelta(days=1) # dont include today in averaging
