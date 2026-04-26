@@ -26,13 +26,15 @@ def format_change(current, previous, units):
 async def main():
     renpho_data = RenphoScalesData(EMAIL, PASSWORD)
 
+    
     today = datetime.now().date()
-    last_week = today - timedelta(days=7)
+    yesterday = datetime.now().date() - timedelta(days=1) # dont include today in averaging
+    last_week = today - timedelta(days=8)
 
-    weight_now = renpho_data.get_rolling_weekly_avg(today, "weight")
+    weight_now = renpho_data.get_rolling_weekly_avg(yesterday, "weight")
     weight_prev = renpho_data.get_rolling_weekly_avg(last_week, "weight")
 
-    bf_now = renpho_data.get_rolling_weekly_avg(today, "bodyfat")
+    bf_now = renpho_data.get_rolling_weekly_avg(yesterday, "bodyfat")
     bf_prev = renpho_data.get_rolling_weekly_avg(last_week, "bodyfat")
 
     lines = ["Weekly fitness summary"]
