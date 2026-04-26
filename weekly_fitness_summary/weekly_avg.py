@@ -68,13 +68,13 @@ if __name__ == "__main__":
     renpho_data = RenphoScalesData(email, password)
 
     for measure in ["weight", "bodyfat"]:
-        avg = renpho_data.get_rolling_weekly_avg(datetime.now().date(), measure)
+        avg = renpho_data.get_rolling_weekly_avg(datetime.now().date() - timedelta(days=1), measure)
         if avg is not None:
             print(f"Rolling weekly average {measure}: {avg:.2f} {renpho_data.measure_units(measure)}")
         else:
             print(f"No measurements found in the last 7 days for {measure}.")
 
-        avg_last_week = renpho_data.get_rolling_weekly_avg(datetime.now().date() - timedelta(days=7), measure)
+        avg_last_week = renpho_data.get_rolling_weekly_avg(datetime.now().date() - timedelta(days=8), measure)
         if avg_last_week is not None:
             print(f"Rolling weekly average {measure} (last week): {avg_last_week:.2f} {renpho_data.measure_units(measure)}")
         else:
