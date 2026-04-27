@@ -85,7 +85,8 @@ def build_food_summary_message(selected_date: date | None = None) -> str:
         "Food diary summary\n"
         f"Average daily calories over the last 7 days: {nutrition_summary['average_daily_calories']:.2f}\n"
         f"Average daily protein over the last 7 days: {nutrition_summary['average_daily_protein']:.2f}g\n"
-        f"Total calorie {calorie_difference_label}: {abs(calorie_difference):.0f} calories"
+        f"Total calorie {calorie_difference_label}: {abs(calorie_difference):.0f} calories\n"
+        f"(Based on {nutrition_summary['logged_day_count']} logged days out of 7)"
     )
 
 
