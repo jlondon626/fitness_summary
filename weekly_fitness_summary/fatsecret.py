@@ -4,7 +4,6 @@ import webbrowser
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl
-from dateutil.relativedelta import relativedelta
 
 import requests
 from dotenv import load_dotenv

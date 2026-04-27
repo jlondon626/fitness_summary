@@ -1,6 +1,6 @@
 import asyncio
 import os
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 import telegram
 from dotenv import load_dotenv
@@ -8,12 +8,26 @@ from dotenv import load_dotenv
 try:
     from .weekly_avg import RenphoScalesData
     from .constants import goal_weight, starting_weight
+    from .fatsecret import (
+        get_average_daily_calories_and_protein,
+        get_food_diary_entries_for_last_7_days,
+    )
 except ImportError:
     from weekly_avg import RenphoScalesData
     from constants import goal_weight, starting_weight
+    from fatsecret import (
+        get_average_daily_calories_and_protein,
+        get_food_diary_entries_for_last_7_days,
+    )
 
 load_dotenv()
 
+
+def _required_env(name: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        raise RuntimeError(f"Missing required environment variable: {name}")
+    return value
 
 
 def format_change(current, previous, units):
@@ -22,16 +36,13 @@ def format_change(current, previous, units):
     return f"{current:.2f}{units} ({direction} {abs(change):.2f}{units} vs last week)"
 
 
-async def main():
-    EMAIL = os.getenv("MY_EMAIL")
-    PASSWORD = os.getenv("MY_PASSWORD")
-    BOT_TOKEN = os.getenv("FITNESS_SUMMARY_BOT_TOKEN")
-    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+def build_weight_summary_message(today: date | None = None) -> str:
+    email = _required_env("MY_EMAIL")
+    password = _required_env("MY_PASSWORD")
+    renpho_data = RenphoScalesData(email, password)
 
-    renpho_data = RenphoScalesData(EMAIL, PASSWORD)
-    
-    today = datetime.now().date()
-    yesterday = datetime.now().date() - timedelta(days=1) # dont include today in averaging
+    today = today or datetime.now().date()
+    yesterday = today - timedelta(days=1)
     last_week = today - timedelta(days=8)
 
     weight_now = renpho_data.get_rolling_weekly_avg(yesterday, "weight")
@@ -57,18 +68,40 @@ async def main():
     else:
         lines.append("Body fat: insufficient Renpho data")
 
-    message = "\n".join(lines)
+    return "\n".join(lines)
 
-    bot = telegram.Bot(BOT_TOKEN)
+
+def build_food_summary_message(selected_date: date | None = None) -> str:
+    selected_date = selected_date or (date.today() - timedelta(days=1))
+    food_diary_entries = get_food_diary_entries_for_last_7_days(selected_date)
+    averages = get_average_daily_calories_and_protein(food_diary_entries)
+
+    return (
+        "Food diary summary\n"
+        f"Average daily calories over the last 7 days: {averages['average_daily_calories']:.2f}\n"
+        f"Average daily protein over the last 7 days: {averages['average_daily_protein']:.2f}g"
+    )
+
+
+async def send_telegram_message(message: str) -> None:
+    bot_token = _required_env("FITNESS_SUMMARY_BOT_TOKEN")
+    chat_id = _required_env("TELEGRAM_CHAT_ID")
+
+    bot = telegram.Bot(bot_token)
     async with bot:
-        await bot.send_message(chat_id=CHAT_ID, text=message)
+        await bot.send_message(chat_id=chat_id, text=message)
 
-def send_telegram_message(message):
-    BOT_TOKEN = os.getenv("FITNESS_SUMMARY_BOT_TOKEN")
-    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
 
-    bot = telegram.Bot(BOT_TOKEN)
-    asyncio.run(bot.send_message(chat_id=CHAT_ID, text=message))
+async def send_weight_summary() -> None:
+    await send_telegram_message(build_weight_summary_message())
+
+
+async def send_food_summary() -> None:
+    await send_telegram_message(build_food_summary_message())
+
+
+async def main() -> None:
+    await send_weight_summary()
 
 
 if __name__ == "__main__":
