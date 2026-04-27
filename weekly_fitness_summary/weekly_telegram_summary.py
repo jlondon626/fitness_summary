@@ -7,16 +7,16 @@ from dotenv import load_dotenv
 
 try:
     from .weekly_avg import RenphoScalesData
-    from .constants import goal_weight, starting_weight
+    from .constants import goal_weight, phase_1_weekly_calories, starting_weight
     from .fatsecret import (
-        get_average_daily_calories_and_protein,
+        get_calories_and_protein_summary,
         get_food_diary_entries_for_last_7_days,
     )
 except ImportError:
     from weekly_avg import RenphoScalesData
-    from constants import goal_weight, starting_weight
+    from constants import goal_weight, phase_1_weekly_calories, starting_weight
     from fatsecret import (
-        get_average_daily_calories_and_protein,
+        get_calories_and_protein_summary,
         get_food_diary_entries_for_last_7_days,
     )
 
@@ -74,12 +74,18 @@ def build_weight_summary_message(today: date | None = None) -> str:
 def build_food_summary_message(selected_date: date | None = None) -> str:
     selected_date = selected_date or (date.today() - timedelta(days=1))
     food_diary_entries = get_food_diary_entries_for_last_7_days(selected_date)
-    averages = get_average_daily_calories_and_protein(food_diary_entries)
+    nutrition_summary = get_calories_and_protein_summary(food_diary_entries)
+    calorie_difference = (
+        nutrition_summary["total_calories"]
+        - phase_1_weekly_calories * nutrition_summary["logged_day_count"]
+    )
+    calorie_difference_label = "surplus" if calorie_difference > 0 else "deficit"
 
     return (
         "Food diary summary\n"
-        f"Average daily calories over the last 7 days: {averages['average_daily_calories']:.2f}\n"
-        f"Average daily protein over the last 7 days: {averages['average_daily_protein']:.2f}g"
+        f"Average daily calories over the last 7 days: {nutrition_summary['average_daily_calories']:.2f}\n"
+        f"Average daily protein over the last 7 days: {nutrition_summary['average_daily_protein']:.2f}g\n"
+        f"Total calorie {calorie_difference_label}: {abs(calorie_difference):.0f} calories"
     )
 
 

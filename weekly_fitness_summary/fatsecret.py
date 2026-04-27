@@ -160,7 +160,7 @@ def get_food_diary_entries_for_last_7_days(selected_date: date) -> dict:
     return entries_by_date
 
 
-def get_average_daily_calories_and_protein(food_diary_entries: dict) -> dict:
+def get_calories_and_protein_summary(food_diary_entries: dict) -> dict:
     total_calories = 0.0
     total_protein = 0.0
     logged_day_count = 0
@@ -179,11 +179,28 @@ def get_average_daily_calories_and_protein(food_diary_entries: dict) -> dict:
         logged_day_count += 1
 
     if logged_day_count == 0:
-        return {"average_daily_calories": 0.0, "average_daily_protein": 0.0}
+        return {
+            "total_calories": 0.0,
+            "total_protein": 0.0,
+            "logged_day_count": 0,
+            "average_daily_calories": 0.0,
+            "average_daily_protein": 0.0,
+        }
 
     return {
+        "total_calories": total_calories,
+        "total_protein": total_protein,
+        "logged_day_count": logged_day_count,
         "average_daily_calories": total_calories / logged_day_count,
         "average_daily_protein": total_protein / logged_day_count,
+    }
+
+
+def get_average_daily_calories_and_protein(food_diary_entries: dict) -> dict:
+    summary = get_calories_and_protein_summary(food_diary_entries)
+    return {
+        "average_daily_calories": summary["average_daily_calories"],
+        "average_daily_protein": summary["average_daily_protein"],
     }
 
 
@@ -192,5 +209,5 @@ if __name__ == "__main__":
         get_diary_authorization_tokens()
     else:
         food_entries = get_food_diary_entries_for_last_7_days(date.today())
-        average_food_metrics = get_average_daily_calories_and_protein(food_entries)
-        print(json.dumps(average_food_metrics, indent=2))
+        food_metrics = get_calories_and_protein_summary(food_entries)
+        print(json.dumps(food_metrics, indent=2))
