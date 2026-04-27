@@ -92,6 +92,7 @@ def get_diary_authorization_tokens() -> dict:
         verifier=verifier,
         signature_type="query",
     )
+
     response = oauth.get(ACCESS_TOKEN_URL, timeout=30)
     response.raise_for_status()
 
@@ -150,13 +151,47 @@ def get_food_diary_entries_for_month(from_date: date) -> dict:
     response.raise_for_status()
     return response.json()
 
+def get_food_diary_entries_for_last_7_days(selected_date: date) -> dict:
+    entries_by_date = {}
+
+    for days_ago in range(6, -1, -1):
+        entry_date = selected_date - timedelta(days=days_ago)
+        entries_by_date[entry_date.isoformat()] = get_food_diary_entries(entry_date)
+
+    return entries_by_date
+
+
+def get_average_daily_calories_and_protein(food_diary_entries: dict) -> dict:
+    total_calories = 0.0
+    total_protein = 0.0
+    logged_day_count = 0
+
+    for day_entries in food_diary_entries.values():
+        food_entries = (day_entries or {}).get("food_entries")
+        if not food_entries:
+            continue
+
+        entries = food_entries.get("food_entry", [])
+        if isinstance(entries, dict):
+            entries = [entries]
+
+        total_calories += sum(float(entry.get("calories", 0)) for entry in entries)
+        total_protein += sum(float(entry.get("protein", 0)) for entry in entries)
+        logged_day_count += 1
+
+    if logged_day_count == 0:
+        return {"average_daily_calories": 0.0, "average_daily_protein": 0.0}
+
+    return {
+        "average_daily_calories": total_calories / logged_day_count,
+        "average_daily_protein": total_protein / logged_day_count,
+    }
+
+
 if __name__ == "__main__":
     if not DIARY_ACCESS_TOKEN or not DIARY_ACCESS_SECRET:
         get_diary_authorization_tokens()
     else:
-        diary_entries_current_month = get_food_diary_entries_for_month(date.today())
-        diary_entries_previous_month = get_food_diary_entries_for_month(date.today() - relativedelta(months=1))
-        diary_entries_combined = [diary_entries_current_month, diary_entries_previous_month]
-
-        with open("diary_entries.json", "w") as f:
-            json.dump(diary_entries_combined, f, indent=2)
+        food_entries = get_food_diary_entries_for_last_7_days(date.today())
+        average_food_metrics = get_average_daily_calories_and_protein(food_entries)
+        print(json.dumps(average_food_metrics, indent=2))

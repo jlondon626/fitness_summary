@@ -63,6 +63,13 @@ async def main():
     async with bot:
         await bot.send_message(chat_id=CHAT_ID, text=message)
 
+def send_telegram_message(message):
+    BOT_TOKEN = os.getenv("FITNESS_SUMMARY_BOT_TOKEN")
+    CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+
+    bot = telegram.Bot(BOT_TOKEN)
+    asyncio.run(bot.send_message(chat_id=CHAT_ID, text=message))
+
 
 if __name__ == "__main__":
     asyncio.run(main())
