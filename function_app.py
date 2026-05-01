@@ -2,6 +2,7 @@ import logging
 import azure.functions as func
 
 from weekly_fitness_summary.weekly_telegram_summary import (
+    send_ai_feedback_summary,
     send_food_summary,
     send_weight_summary,
 )
@@ -21,3 +22,6 @@ async def weekly_fitness_summary(mytimer: func.TimerRequest) -> None:
 
     logging.info("Food diary logging timer triggered.")
     await send_food_summary()
+
+    logging.info("AI coaching feedback timer triggered.")
+    await send_ai_feedback_summary()
