@@ -190,7 +190,7 @@ async def build_ai_feedback_message(today: date | None = None) -> str:
                     "content": (
                         "Create a Telegram-friendly weekly coaching note from this JSON. "
                         "Keep it under 1200 characters. Include: 1) previous week feedback, "
-                        "2) week ahead advice, 3) one measurable focus.\n\n"
+                        "2) week ahead advice, 3) specific aims for fitness sessions, 4) one measurable focus.\n\n"
                         f"{json.dumps(payload, default=str, ensure_ascii=False)}"
                     ),
                 },
