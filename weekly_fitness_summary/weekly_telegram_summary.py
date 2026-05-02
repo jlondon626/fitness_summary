@@ -1,3 +1,4 @@
+from __future__ import annotations
 import asyncio
 import json
 import os
@@ -8,6 +9,19 @@ import telegram
 from azure.cosmos import CosmosClient
 from dotenv import load_dotenv
 from openai import AsyncAzureOpenAI
+
+from collections import defaultdict
+
+KEY_LIFTS = {
+    "Bench Press",
+    "Incline Barbell Press",
+    "Squat",
+    "Deadlift",
+    "Romanian Deadlift",
+    "Pull-Up",
+    "Dumbbell Shoulder Press",
+    "Overhead Dumbbell Press",
+}
 
 try:
     from .weekly_avg import RenphoScalesData
@@ -42,6 +56,184 @@ def _optional_int_env(name: str, default: int) -> int:
         return int(value)
     except ValueError as exc:
         raise RuntimeError(f"{name} must be an integer") from exc
+
+def build_compact_ai_payload(payload: dict[str, Any]) -> dict[str, Any]:
+    """
+    Converts verbose raw Cosmos workout records into a compact payload suitable
+    for Azure OpenAI.
+
+    Keeps:
+    - report/target data
+    - existing computed summaries
+    - training counts
+    - best sets for key lifts
+    - compact session summaries
+
+    Removes:
+    - ids
+    - device ids
+    - timestamps per set
+    - nested raw Cosmos structure
+    """
+
+    records = payload.get("cosmos_records", [])
+
+    period_start = payload.get("previous_week", {}).get("start_date")
+    period_end = payload.get("previous_week", {}).get("end_date")
+
+    current_week_records = [
+        r for r in records
+        if period_start <= r.get("dateISO", "") <= period_end
+    ]
+
+    total_sets = 0
+    total_reps = 0
+    total_volume = 0.0
+
+    sessions = []
+    exercise_summary = defaultdict(lambda: {
+        "sets": 0,
+        "reps": 0,
+        "volume": 0.0,
+        "best_set": None,
+    })
+
+    for session in current_week_records:
+        session_sets = 0
+        session_reps = 0
+        session_volume = 0.0
+        session_exercises = []
+
+        for exercise in session.get("exercises", []):
+            name = exercise.get("name")
+            sets = exercise.get("sets", [])
+
+            if not sets:
+                continue
+
+            exercise_sets = 0
+            exercise_reps = 0
+            exercise_volume = 0.0
+            best_set = None
+
+            for s in sets:
+                weight = float(s.get("weightKg") or 0)
+                reps = int(s.get("reps") or 0)
+                volume = weight * reps
+
+                exercise_sets += 1
+                exercise_reps += reps
+                exercise_volume += volume
+
+                candidate = {
+                    "weight_kg": weight,
+                    "reps": reps,
+                    "volume": volume,
+                }
+
+                if best_set is None:
+                    best_set = candidate
+                else:
+                    # Prefer heavier set; use reps as tie-breaker
+                    if (
+                        candidate["weight_kg"] > best_set["weight_kg"]
+                        or (
+                            candidate["weight_kg"] == best_set["weight_kg"]
+                            and candidate["reps"] > best_set["reps"]
+                        )
+                    ):
+                        best_set = candidate
+
+            total_sets += exercise_sets
+            total_reps += exercise_reps
+            total_volume += exercise_volume
+
+            session_sets += exercise_sets
+            session_reps += exercise_reps
+            session_volume += exercise_volume
+
+            exercise_summary[name]["sets"] += exercise_sets
+            exercise_summary[name]["reps"] += exercise_reps
+            exercise_summary[name]["volume"] += exercise_volume
+
+            existing_best = exercise_summary[name]["best_set"]
+            if existing_best is None:
+                exercise_summary[name]["best_set"] = best_set
+            elif best_set is not None and (
+                best_set["weight_kg"] > existing_best["weight_kg"]
+                or (
+                    best_set["weight_kg"] == existing_best["weight_kg"]
+                    and best_set["reps"] > existing_best["reps"]
+                )
+            ):
+                exercise_summary[name]["best_set"] = best_set
+
+            session_exercises.append({
+                "name": name,
+                "sets": exercise_sets,
+                "reps": exercise_reps,
+                "volume_kg": round(exercise_volume, 1),
+                "best_set": format_set(best_set),
+            })
+
+        sessions.append({
+            "date": session.get("dateISO"),
+            "title": session.get("title"),
+            "sets": session_sets,
+            "reps": session_reps,
+            "volume_kg": round(session_volume, 1),
+            "exercises": session_exercises,
+        })
+
+    notable_lifts = []
+
+    for exercise_name in KEY_LIFTS:
+        if exercise_name in exercise_summary:
+            data = exercise_summary[exercise_name]
+            notable_lifts.append({
+                "exercise": exercise_name,
+                "sets": data["sets"],
+                "reps": data["reps"],
+                "volume_kg": round(data["volume"], 1),
+                "best_set": format_set(data["best_set"]),
+            })
+
+    compact_payload = {
+        "report_date": payload.get("report_date"),
+        "period": payload.get("previous_week"),
+        "targets": payload.get("targets"),
+        "computed_summaries": payload.get("computed_summaries"),
+        "training_summary": {
+            "sessions_completed": len(current_week_records),
+            "session_titles": [s.get("title") for s in current_week_records],
+            "total_sets": total_sets,
+            "total_reps": total_reps,
+            "total_volume_kg": round(total_volume, 1),
+            "notable_lifts": notable_lifts,
+            "sessions": sessions,
+        },
+        "instruction": (
+            "Write a concise weekly fitness summary. Comment on weight trend, "
+            "calorie/protein adherence, training consistency, and any notable lifts. "
+            "Be practical and direct. Do not overstate conclusions where food logging "
+            "is incomplete."
+        ),
+    }
+
+    return compact_payload
+
+
+def format_set(set_data: dict[str, Any] | None) -> str | None:
+    if not set_data:
+        return None
+
+    weight = set_data["weight_kg"]
+    reps = set_data["reps"]
+
+    if weight.is_integer():
+        weight = int(weight)
+
+    return f"{weight}kg x {reps}"
 
 
 def format_change(current, previous, units):
@@ -168,6 +360,7 @@ def _build_ai_prompt_payload(today: date | None = None) -> dict[str, Any]:
 async def build_ai_feedback_message(today: date | None = None) -> str:
     deployment = _required_env("AZURE_OPENAI_DEPLOYMENT")
     payload = _build_ai_prompt_payload(today)
+    compact_payload = build_compact_ai_payload(payload)
 
     async with AsyncAzureOpenAI(
         api_key=_required_env("AZURE_OPENAI_API_KEY"),
@@ -181,17 +374,23 @@ async def build_ai_feedback_message(today: date | None = None) -> str:
                     "role": "system",
                     "content": (
                         "You are a practical fitness coach. Use only the supplied data. "
-                        "Give concise, specific feedback on the previous week and clear "
-                        "advice for the week ahead. Do not diagnose medical conditions."
+                        "Give concise, specific feedback on the previous week and clear advice for the week ahead. "
+                        "When recommending training targets, base them on recent logged sessions and avoid inventing exact weights. "
+                        "Do not diagnose medical conditions."
                     ),
                 },
                 {
                     "role": "user",
                     "content": (
-                        "Create a Telegram-friendly weekly coaching note from this JSON. "
-                        "Keep it under 1200 characters. Include: 1) previous week feedback, "
-                        "2) week ahead advice, 3) specific aims for fitness sessions, 4) one measurable focus.\n\n"
-                        f"{json.dumps(payload, default=str, ensure_ascii=False)}"
+                        "Create a concise Telegram-friendly weekly coaching note from this JSON. "
+                        "Use only the supplied data. Keep it under 1200 characters. "
+                        "Include these sections: "
+                        "1) Previous week: specific feedback on weight, nutrition, and training. "
+                        "2) Week ahead: practical advice for calories, protein, consistency, and recovery. "
+                        "3) Fitness session aims: suggest target weights/reps/structure only where supported by recent workout data; otherwise give clear progression rules. "
+                        "4) Key focus: one measurable priority for the next 7 days. "
+                        "If data is missing or incomplete, say so briefly. Avoid medical claims.\n\n"
+                        f"{json.dumps(compact_payload, default=str, ensure_ascii=False)}"
                     ),
                 },
             ],
@@ -231,4 +430,9 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    # asyncio.run(main())
+    payload = _build_ai_prompt_payload(datetime.today().date())
+    compact_payload = build_compact_ai_payload(payload)
+    with open("debug_payload.json", "w", encoding="utf-8") as f:
+        json.dump(compact_payload, f, default=str, ensure_ascii=False, indent=2)
+

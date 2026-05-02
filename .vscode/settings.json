@@ -1,7 +1,8 @@
 {
     "azureFunctions.deploySubpath": ".",
     "azureFunctions.scmDoBuildDuringDeployment": true,
-    "azureFunctions.pythonVenv": ".venv",
+    "azureFunctions.pythonVenv": ".venv312",
+    "python.defaultInterpreterPath": "${workspaceFolder}\\.venv312\\Scripts\\python.exe",
     "azureFunctions.projectLanguage": "Python",
     "azureFunctions.projectRuntime": "~4",
     "debug.internalConsoleOptions": "neverOpen",

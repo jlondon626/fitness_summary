@@ -151,6 +151,8 @@ activemq-data/
 .env
 .envrc
 .venv
+.venv312/
+.tmp/
 env/
 venv/
 ENV/
@@ -218,3 +220,6 @@ __marimo__/
 .streamlit/secrets.toml
 
 .python_packages
+
+# temporary json file for debugging AI prompt payloads
+debug_payload.json
