@@ -332,6 +332,11 @@ def _record_active_calories(record: dict[str, Any]) -> float | None:
     return float(value)
 
 
+def _has_positive_active_calories(record: dict[str, Any]) -> bool:
+    active_calories = _record_active_calories(record)
+    return active_calories is not None and active_calories > 0
+
+
 def build_weekly_metrics(
     participant: dict[str, Any],
     raw_records: list[dict[str, Any]],
@@ -346,7 +351,7 @@ def build_weekly_metrics(
         record
         for record in raw_records
         if record.get("type") in {"active_calories_daily", "apple-health-data"}
-        and _record_active_calories(record) is not None
+        and _has_positive_active_calories(record)
     ]
 
     weights = [float(record["weightKg"]) for record in weigh_ins if record.get("weightKg") is not None]
