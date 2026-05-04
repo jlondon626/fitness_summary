@@ -672,7 +672,7 @@ def persist_competition_ai_message(payload: dict[str, Any], message: str) -> dic
         "periodStartDate": leaderboard.get("periodStartDate") or leaderboard.get("weekStartDate"),
         "periodEndDate": leaderboard.get("periodEndDate") or leaderboard.get("weekEndDate"),
         "status": "generated",
-        "channel": "telegram",
+        "channel": "app",
         "message": message,
         "modelDeployment": os.getenv("AZURE_OPENAI_DEPLOYMENT"),
         "generatedAt": generated_at,
@@ -689,6 +689,7 @@ def persist_competition_ai_message(payload: dict[str, Any], message: str) -> dic
         "aiMessageGeneratedAt": generated_at,
         "aiMessageStatus": "generated",
         "aiMessage": message,
+        "message": message,
     }
     container.upsert_item(leaderboard_update)
     return _compact_for_prompt(saved_message)
@@ -836,6 +837,18 @@ async def send_ai_feedback_summary() -> None:
 async def send_competition_leaderboard_summary(leaderboard_kind: str) -> None:
     await send_telegram_message(
         await build_ai_feedback_message(leaderboard_kind=leaderboard_kind, competition_only=True)
+    )
+
+
+async def generate_competition_leaderboard_summary(
+    leaderboard_kind: str,
+    today: date | None = None,
+) -> str:
+    return await build_ai_feedback_message(
+        today=today,
+        leaderboard_kind=leaderboard_kind,
+        competition_only=True,
+        persist_competition_message=True,
     )
 
 

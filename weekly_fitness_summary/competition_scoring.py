@@ -803,6 +803,7 @@ def build_leaderboard_document(
         "status": "published",
         "version": 1,
         "rankings": rankings,
+        "rows": rankings,
         "winnerParticipantId": _unique_participant_at_score(rankings, top_score),
         "loserParticipantId": _unique_participant_at_score(rankings, bottom_score),
         "telegramMessageId": None,

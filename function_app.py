@@ -4,7 +4,7 @@ import azure.functions as func
 from weekly_fitness_summary.competition_scoring import score_active_challenges
 from weekly_fitness_summary.raw_fitness_sync import sync_daily_fitness_raw
 from weekly_fitness_summary.weekly_telegram_summary import (
-    send_competition_leaderboard_summary,
+    generate_competition_leaderboard_summary,
     send_food_summary,
     send_weight_summary,
     should_send_competition_leaderboard,
@@ -69,8 +69,8 @@ async def weekly_competition_leaderboard_summary_timer(mytimer: func.TimerReques
         logging.info("Skipping weekly leaderboard; monthly/final leaderboard has priority.")
         return
 
-    logging.info("Weekly competition leaderboard timer triggered.")
-    await send_competition_leaderboard_summary("week")
+    logging.info("Weekly competition leaderboard app message timer triggered.")
+    await generate_competition_leaderboard_summary("week")
 
 
 @app.function_name(name="monthly_competition_leaderboard_summary")
@@ -85,8 +85,8 @@ async def monthly_competition_leaderboard_summary_timer(mytimer: func.TimerReque
         logging.info("Skipping monthly leaderboard; it is not the first Sunday after a month end.")
         return
 
-    logging.info("Monthly competition leaderboard timer triggered.")
-    await send_competition_leaderboard_summary("month")
+    logging.info("Monthly competition leaderboard app message timer triggered.")
+    await generate_competition_leaderboard_summary("month")
 
 
 @app.function_name(name="final_competition_leaderboard_summary")
@@ -101,5 +101,5 @@ async def final_competition_leaderboard_summary_timer(mytimer: func.TimerRequest
         logging.info("Skipping final leaderboard; it is not the challenge's last Sunday.")
         return
 
-    logging.info("Final competition leaderboard timer triggered.")
-    await send_competition_leaderboard_summary("final")
+    logging.info("Final competition leaderboard app message timer triggered.")
+    await generate_competition_leaderboard_summary("final")

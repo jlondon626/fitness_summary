@@ -34,7 +34,7 @@ On normal weekly Sundays, the Azure timer sends fitness/food summaries and a wee
   - Weekly, monthly, or final leaderboard results.
   - Score explanations, winning/losing drivers, and next-period improvement actions.
   - Relevant challenge forfeits when the challenge includes a `forfeits` config.
-  - If no competition leaderboard exists yet, the original weekly coaching feedback can still be generated locally.
+  - Stored in Cosmos for the app to display; competition leaderboard messages are no longer posted to Telegram.
 
 ## Project Structure
 
@@ -140,13 +140,13 @@ Competition AI messages are stored in the competition container as `leaderboard_
   "leaderboardKind": "week",
   "periodStartDate": "2026-05-10",
   "periodEndDate": "2026-05-16",
-  "channel": "telegram",
+  "channel": "app",
   "message": "Competition leaderboard feedback\n...",
   "generatedAt": "2026-05-17T07:30:00Z"
 }
 ```
 
-The corresponding leaderboard document also gets `aiMessageId`, `aiMessageGeneratedAt`, `aiMessageStatus`, and `aiMessage` fields for simple frontend reads.
+The corresponding leaderboard document also gets `aiMessageId`, `aiMessageGeneratedAt`, `aiMessageStatus`, `aiMessage`, and `message` fields for simple frontend reads. Leaderboard documents include both `rankings` and `rows`; they contain the same ranked data so frontend code can use either naming convention.
 
 ## Competition Data Model
 
@@ -319,7 +319,7 @@ Azure timer expressions use six fields:
 second minute hour day month day-of-week
 ```
 
-The weekly summary and all three leaderboard timers run at `07:30 UTC` every Sunday, which is `08:30 BST` during the May-Aug UK daylight saving competition window. Raw sync runs daily at `23:45 UTC`. Competition scoring runs Sunday at `00:15 UTC` and scores the previous completed competition week.
+The weekly summary and all three leaderboard timers run at `07:30 UTC` every Sunday, which is `08:30 BST` during the May-Aug UK daylight saving competition window. Raw sync runs daily at `23:45 UTC`. Competition scoring runs Sunday at `00:15 UTC` and scores the previous completed competition week. Leaderboard timers generate and store app messages in Cosmos; they do not post competition leaderboard messages to Telegram.
 
 The leaderboard timers are exclusive. They all wake up on Sunday, but only one sends a message:
 
