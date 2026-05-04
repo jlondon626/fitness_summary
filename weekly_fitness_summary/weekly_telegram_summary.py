@@ -573,9 +573,31 @@ def _is_first_sunday_after_month_end(value: date) -> bool:
     return value.weekday() == 6 and value.day <= 7
 
 
-def get_due_competition_leaderboard_kind(today: date | None = None) -> str:
+def _has_completed_challenge_week(challenge: dict[str, Any], today: date) -> bool:
+    week_starts_on = challenge.get("weekStartsOn", "SUNDAY")
+    current_week_start = today - timedelta(days=(today.weekday() - 6) % 7)
+    if week_starts_on.upper() != "SUNDAY":
+        week_start_offsets = {
+            "MONDAY": 0,
+            "TUESDAY": 1,
+            "WEDNESDAY": 2,
+            "THURSDAY": 3,
+            "FRIDAY": 4,
+            "SATURDAY": 5,
+            "SUNDAY": 6,
+        }
+        target_weekday = week_start_offsets.get(week_starts_on.upper(), 6)
+        current_week_start = today - timedelta(days=(today.weekday() - target_weekday) % 7)
+
+    previous_week_end = current_week_start - timedelta(days=1)
+    return previous_week_end >= _parse_iso_date(challenge["startDate"])
+
+
+def get_due_competition_leaderboard_kind(today: date | None = None) -> str | None:
     today = today or date.today()
     challenge = get_selected_competition_challenge()
+    if not challenge or not challenge.get("startDate") or not _has_completed_challenge_week(challenge, today):
+        return None
 
     if challenge and challenge.get("endDate") and today == _last_sunday_on_or_before(_parse_iso_date(challenge["endDate"])):
         return "final"
@@ -586,6 +608,10 @@ def get_due_competition_leaderboard_kind(today: date | None = None) -> str:
 
 def should_send_competition_leaderboard(leaderboard_kind: str, today: date | None = None) -> bool:
     return _normalise_leaderboard_kind(leaderboard_kind) == get_due_competition_leaderboard_kind(today)
+
+
+def should_send_routine_weekly_summary(today: date | None = None) -> bool:
+    return get_due_competition_leaderboard_kind(today) not in {"month", "final"}
 
 
 def _forfeit_for_leaderboard(challenge: dict[str, Any] | None, leaderboard_kind: str) -> dict[str, Any] | None:

@@ -344,6 +344,9 @@ def _has_positive_active_calories(record: dict[str, Any]) -> bool:
 def build_weekly_metrics(
     participant: dict[str, Any],
     raw_records: list[dict[str, Any]],
+    *,
+    challenge: dict[str, Any] | None = None,
+    week_start: date | None = None,
 ) -> dict[str, Any]:
     weigh_ins = sorted(
         [record for record in raw_records if record.get("type") == "renpho_daily"],
@@ -361,8 +364,25 @@ def build_weekly_metrics(
     weights = [float(record["weightKg"]) for record in weigh_ins if record.get("weightKg") is not None]
     average_bodyweight = _average(weights)
     weekly_weight_change_pct = None
+    weight_trend_start_weight = None
+    weight_trend_end_weight = None
+    weight_trend_method = None
 
-    if len(weights) >= 2 and weights[0] != 0:
+    is_first_challenge_week = (
+        challenge is not None
+        and week_start is not None
+        and week_start == _challenge_start(challenge)
+    )
+
+    if is_first_challenge_week and weights and average_bodyweight is not None and weights[0] != 0:
+        weight_trend_start_weight = weights[0]
+        weight_trend_end_weight = average_bodyweight
+        weight_trend_method = "first_challenge_weigh_in_to_first_week_average"
+        weekly_weight_change_pct = (average_bodyweight - weights[0]) / weights[0]
+    elif len(weights) >= 2 and weights[0] != 0:
+        weight_trend_start_weight = weights[0]
+        weight_trend_end_weight = weights[-1]
+        weight_trend_method = "first_to_last_weigh_in"
         weekly_weight_change_pct = (weights[-1] - weights[0]) / weights[0]
 
     daily_calorie_target = participant.get("averageDailyCalorieTarget")
@@ -384,6 +404,9 @@ def build_weekly_metrics(
 
     return {
         "weeklyWeightChangePct": weekly_weight_change_pct,
+        "weightTrendStartWeightKg": round(weight_trend_start_weight, 2) if weight_trend_start_weight is not None else None,
+        "weightTrendEndWeightKg": round(weight_trend_end_weight, 2) if weight_trend_end_weight is not None else None,
+        "weightTrendMethod": weight_trend_method,
         "daysWithWeighIn": len(weigh_ins),
         "averageBodyweightKg": round(average_bodyweight, 2) if average_bodyweight is not None else None,
         "averageDailyCalories": round(average_daily_calories, 1) if average_daily_calories is not None else None,
@@ -512,6 +535,13 @@ def explain_category(category_name: str, category_score: dict[str, Any], metrics
         if pct is None:
             return "Insufficient weigh-in data to calculate a weekly weight trend."
         direction = "Lost" if metric_value < 0 else "Gained" if metric_value > 0 else "Maintained"
+        if metrics.get("weightTrendMethod") == "first_challenge_weigh_in_to_first_week_average":
+            start_weight = _format_number(metrics.get("weightTrendStartWeightKg"), "kg")
+            end_weight = _format_number(metrics.get("weightTrendEndWeightKg"), "kg")
+            return (
+                f"{direction} {pct} bodyweight from challenge start weigh-in "
+                f"({start_weight}) to first-week average ({end_weight})."
+            )
         return f"{direction} {pct} bodyweight."
 
     if category_name == "calorieAdherence":
@@ -945,7 +975,7 @@ def build_weekly_score_document(
     week_end: date,
     raw_records: list[dict[str, Any]],
 ) -> dict[str, Any]:
-    metrics = build_weekly_metrics(participant, raw_records)
+    metrics = build_weekly_metrics(participant, raw_records, challenge=challenge, week_start=week_start)
     category_scores = {
         category_name: score_category(category_name, category_rules, metrics)
         for category_name, category_rules in scoring_rules.get("categories", {}).items()

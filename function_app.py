@@ -8,6 +8,7 @@ from weekly_fitness_summary.weekly_telegram_summary import (
     send_food_summary,
     send_weight_summary,
     should_send_competition_leaderboard,
+    should_send_routine_weekly_summary,
 )
 
 app = func.FunctionApp()
@@ -20,7 +21,7 @@ app = func.FunctionApp()
     use_monitor=True,
 )
 async def weekly_fitness_summary(mytimer: func.TimerRequest) -> None:
-    if not should_send_competition_leaderboard("week"):
+    if not should_send_routine_weekly_summary():
         logging.info("Skipping weekly fitness summary because monthly/final leaderboard is due.")
         return
 

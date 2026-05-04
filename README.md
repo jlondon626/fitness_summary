@@ -109,6 +109,8 @@ Apple Health rows are joined by participant `healthUserID`, `appleHealthUserID`,
 
 Weekly score documents include a presentation-friendly `points` summary, per-category `explanations`, `capsApplied`, and draft/publish fields. They also keep detailed `categoryScores`, `metrics`, and `scoringWarnings` for audit/debugging.
 
+For week one, `weightTrend` compares the earliest weigh-in in the challenge week with the rolling average weight across that first week. Later weeks use the first-to-last weigh-in change within that scored week. Score metrics include `weightTrendStartWeightKg`, `weightTrendEndWeightKg`, and `weightTrendMethod` so the frontend can explain the comparison.
+
 After weekly scores are written, the scorer writes leaderboard documents by adding together existing weekly scores. It creates `leaderboard_week` and `leaderboard_month` documents on each scoring run, plus `leaderboard_final` once the scored period reaches the challenge end date. If a Sunday-start challenge also has a Sunday `endDate`, the final leaderboard becomes available after the Saturday scoring window immediately before that Sunday. Leaderboards keep `participantId` because they are competition outputs; raw fitness data remains keyed only by `userID`.
 
 The scorer also writes the latest running tally back onto the current weekly score documents so a scores endpoint can display current standings without recomputing totals:
@@ -323,6 +325,7 @@ The weekly summary and all three leaderboard timers run at `07:30 UTC` every Sun
 
 The leaderboard timers are exclusive. They all wake up on Sunday, but only one sends a message:
 
+- no leaderboard is generated until at least one full challenge week has completed
 - `final` wins if today is the last Sunday on or before the challenge `endDate`.
 - `month` wins on the first Sunday after a month end.
 - `week` runs on all other Sundays.
