@@ -227,7 +227,7 @@ def build_fatsecret_daily_document(
 ) -> dict[str, Any]:
     entries = _food_entries_for_day(food_diary_response)
     user_slug = _user_slug(user_id)
-    protein_total = round(sum(float(entry.get("protein", 0)) for entry in entries), 1)
+    protein_total = float(round(sum(float(entry.get("protein", 0)) for entry in entries), 1))
 
     return {
         "id": f"fatsecret__{user_slug}__{selected_date.isoformat()}",
