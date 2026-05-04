@@ -366,7 +366,7 @@ FORFEIT_KEYS_BY_LEADERBOARD_KIND = {
 
 
 def _normalise_leaderboard_kind(leaderboard_kind: str | None = None) -> str:
-    selected_kind = leaderboard_kind or _optional_env("FITNESS_COMPETITION_AI_LEADERBOARD_KIND", "week")
+    selected_kind = leaderboard_kind or "week"
     selected_kind = selected_kind.strip().strip('"').lower()
     if selected_kind not in LEADERBOARD_KINDS:
         raise RuntimeError("leaderboard kind must be one of: week, month, final")
@@ -375,25 +375,16 @@ def _normalise_leaderboard_kind(leaderboard_kind: str | None = None) -> str:
 
 def get_latest_competition_leaderboard(leaderboard_kind: str | None = None) -> dict[str, Any] | None:
     container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
-    challenge_id = os.getenv("FITNESS_COMPETITION_CHALLENGE_ID")
     leaderboard_kind = _normalise_leaderboard_kind(leaderboard_kind)
-    parameters = []
-    challenge_filter = ""
     leaderboard_type = f"leaderboard_{leaderboard_kind}"
-
-    if challenge_id:
-        challenge_filter = "AND c.challengeID = @challengeID"
-        parameters.append({"name": "@challengeID", "value": challenge_id.strip().strip('"')})
-
-    parameters.append({"name": "@leaderboardType", "value": leaderboard_type})
 
     leaderboards = _query_cosmos(
         container_name,
         (
             "SELECT TOP 1 * FROM c WHERE c.type = @leaderboardType "
-            f"{challenge_filter} ORDER BY c.periodEndDate DESC"
+            "ORDER BY c.periodEndDate DESC"
         ),
-        parameters,
+        [{"name": "@leaderboardType", "value": leaderboard_type}],
     )
     return _compact_for_prompt(leaderboards[0]) if leaderboards else None
 
@@ -410,11 +401,6 @@ def get_competition_challenge(challenge_id: str) -> dict[str, Any] | None:
 
 def get_selected_competition_challenge() -> dict[str, Any] | None:
     container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
-    challenge_id = os.getenv("FITNESS_COMPETITION_CHALLENGE_ID")
-
-    if challenge_id:
-        return get_competition_challenge(challenge_id.strip().strip('"'))
-
     challenges = _query_cosmos(
         container_name,
         "SELECT TOP 1 * FROM c WHERE c.type = 'challenge' AND c.status = 'active' ORDER BY c.startDate DESC",

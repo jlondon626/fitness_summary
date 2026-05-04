@@ -105,7 +105,6 @@ def _query_all(container, query: str, parameters: list[dict[str, Any]]) -> list[
 
 def get_active_challenges(challenge_id: str | None = None) -> list[dict[str, Any]]:
     container = _competitions_container()
-    challenge_id = challenge_id or _optional_env("FITNESS_COMPETITION_CHALLENGE_ID", "")
 
     if challenge_id:
         challenges = _query_all(

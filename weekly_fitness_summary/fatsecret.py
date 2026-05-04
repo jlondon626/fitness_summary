@@ -1,6 +1,7 @@
 import os
 import json
 import webbrowser
+from dataclasses import dataclass
 from datetime import date, timedelta
 from pathlib import Path
 from urllib.parse import parse_qsl
@@ -24,6 +25,14 @@ API_URL = "https://platform.fatsecret.com/rest/server.api"
 REQUEST_TOKEN_URL = "https://authentication.fatsecret.com/oauth/request_token"
 AUTHORIZE_URL = "https://authentication.fatsecret.com/oauth/authorize"
 ACCESS_TOKEN_URL = "https://authentication.fatsecret.com/oauth/access_token"
+
+
+@dataclass(frozen=True)
+class FatSecretDiaryCredentials:
+    consumer_key: str
+    consumer_secret: str
+    access_token: str
+    access_secret: str
 
 
 def get_access_token(scope: str = "basic") -> str:
@@ -102,25 +111,40 @@ def get_diary_authorization_tokens() -> dict:
     return token_response
 
 
-def _diary_oauth_session() -> OAuth1Session:
-    if not all([CONSUMER_KEY, CONSUMER_SECRET, DIARY_ACCESS_TOKEN, DIARY_ACCESS_SECRET]):
+def _default_diary_credentials() -> FatSecretDiaryCredentials:
+    return FatSecretDiaryCredentials(
+        consumer_key=CONSUMER_KEY,
+        consumer_secret=CONSUMER_SECRET,
+        access_token=DIARY_ACCESS_TOKEN,
+        access_secret=DIARY_ACCESS_SECRET,
+    )
+
+
+def _diary_oauth_session(credentials: FatSecretDiaryCredentials | None = None) -> OAuth1Session:
+    credentials = credentials or _default_diary_credentials()
+    if not all([
+        credentials.consumer_key,
+        credentials.consumer_secret,
+        credentials.access_token,
+        credentials.access_secret,
+    ]):
         raise RuntimeError(
             "Missing FatSecret OAuth 1 diary credentials. Run get_diary_authorization_tokens() "
             "once, then add FATSECRET_ACCESS_TOKEN and FATSECRET_ACCESS_SECRET to .env."
         )
 
     return OAuth1Session(
-        CONSUMER_KEY,
-        client_secret=CONSUMER_SECRET,
-        resource_owner_key=DIARY_ACCESS_TOKEN,
-        resource_owner_secret=DIARY_ACCESS_SECRET,
+        credentials.consumer_key,
+        client_secret=credentials.consumer_secret,
+        resource_owner_key=credentials.access_token,
+        resource_owner_secret=credentials.access_secret,
         signature_type="query",
     )
 
 
-def get_food_diary_entries(entry_date: date) -> dict:
+def get_food_diary_entries(entry_date: date, credentials: FatSecretDiaryCredentials | None = None) -> dict:
     days_since_epoch = (entry_date - date(1970, 1, 1)).days
-    oauth = _diary_oauth_session()
+    oauth = _diary_oauth_session(credentials)
 
     response = oauth.get(
         API_URL,
@@ -134,9 +158,12 @@ def get_food_diary_entries(entry_date: date) -> dict:
     response.raise_for_status()
     return response.json()
 
-def get_food_diary_entries_for_month(from_date: date) -> dict:
+def get_food_diary_entries_for_month(
+    from_date: date,
+    credentials: FatSecretDiaryCredentials | None = None,
+) -> dict:
     days_since_epoch_from = (from_date - date(1970, 1, 1)).days
-    oauth = _diary_oauth_session()
+    oauth = _diary_oauth_session(credentials)
 
     response = oauth.get(
         API_URL,
@@ -150,12 +177,15 @@ def get_food_diary_entries_for_month(from_date: date) -> dict:
     response.raise_for_status()
     return response.json()
 
-def get_food_diary_entries_for_last_7_days(selected_date: date) -> dict:
+def get_food_diary_entries_for_last_7_days(
+    selected_date: date,
+    credentials: FatSecretDiaryCredentials | None = None,
+) -> dict:
     entries_by_date = {}
 
     for days_ago in range(6, -1, -1):
         entry_date = selected_date - timedelta(days=days_ago)
-        entries_by_date[entry_date.isoformat()] = get_food_diary_entries(entry_date)
+        entries_by_date[entry_date.isoformat()] = get_food_diary_entries(entry_date, credentials)
 
     return entries_by_date
 

@@ -56,17 +56,23 @@ weekly_fitness_summary/
 Create a local `.env` file for development. Do not commit it.
 
 ```text
-MY_EMAIL=your_renpho_email
-MY_PASSWORD=your_renpho_password
+RENPHO_JACK_EMAIL=your_jack_renpho_email
+RENPHO_JACK_PASSWORD=your_jack_renpho_password
+RENPHO_ASH_EMAIL=your_ash_renpho_email
+RENPHO_ASH_PASSWORD=your_ash_renpho_password
 FITNESS_SUMMARY_BOT_TOKEN=your_telegram_bot_token
 TELEGRAM_CHAT_ID=your_telegram_chat_id
 
 FATSECRET_CLIENT_ID=your_fatsecret_oauth2_client_id
 FATSECRET_CLIENT_SECRET=your_fatsecret_oauth2_client_secret
-FATSECRET_CONSUMER_KEY=your_fatsecret_oauth1_consumer_key
-FATSECRET_CONSUMER_SECRET=your_fatsecret_oauth1_consumer_secret
-FATSECRET_ACCESS_TOKEN=your_fatsecret_oauth1_access_token
-FATSECRET_ACCESS_SECRET=your_fatsecret_oauth1_access_secret
+FATSECRET_JACK_CONSUMER_KEY=your_jack_fatsecret_oauth1_consumer_key
+FATSECRET_JACK_CONSUMER_SECRET=your_jack_fatsecret_oauth1_consumer_secret
+FATSECRET_JACK_ACCESS_TOKEN=your_jack_fatsecret_oauth1_access_token
+FATSECRET_JACK_ACCESS_SECRET=your_jack_fatsecret_oauth1_access_secret
+FATSECRET_ASH_CONSUMER_KEY=your_ash_fatsecret_oauth1_consumer_key
+FATSECRET_ASH_CONSUMER_SECRET=your_ash_fatsecret_oauth1_consumer_secret
+FATSECRET_ASH_ACCESS_TOKEN=your_ash_fatsecret_oauth1_access_token
+FATSECRET_ASH_ACCESS_SECRET=your_ash_fatsecret_oauth1_access_secret
 
 COSMOS_DB_CONNECTION_STRING=your_cosmos_connection_string
 COSMOS_DB_DATABASE_NAME=your_cosmos_database_name
@@ -79,10 +85,6 @@ COSMOS_DB_COMPETITIONS_CONTAINER_NAME=fitness_competitions
 COSMOS_DB_AI_ITEM_LIMIT=100
 COSMOS_DB_AI_QUERY=SELECT TOP 100 * FROM c ORDER BY c._ts DESC
 
-FITNESS_COMPETITION_USER_ID=Jack
-FITNESS_COMPETITION_CHALLENGE_ID=challenge_2026_05_04
-FITNESS_COMPETITION_AI_LEADERBOARD_KIND=week
-
 AZURE_OPENAI_API_KEY=your_azure_openai_key
 AZURE_OPENAI_ENDPOINT=https://your-resource.openai.azure.com
 AZURE_OPENAI_DEPLOYMENT=your_model_deployment_name
@@ -93,13 +95,13 @@ For Azure, add the same values as Function App application settings. Azure will 
 
 `COSMOS_DB_AI_QUERY` is optional. Set it if your container needs a more specific query for the records you want the AI to see.
 
-`COSMOS_DB_RAW_CONTAINER_NAME` defaults to `fitness_raw`. The daily raw sync writes one Renpho document and one FatSecret document per user/date using deterministic ids such as `renpho__user_jack__2026-05-04` and `fatsecret__user_jack__2026-05-04`.
+`COSMOS_DB_RAW_CONTAINER_NAME` defaults to `fitness_raw`. The daily raw sync writes one Renpho document and one FatSecret document per user/date using deterministic ids such as `renpho__user_jack__2026-05-04` and `fatsecret__user_jack__2026-05-04`. Users to sync are read from `fitness_competitions` user documents with enabled Renpho/FatSecret sources, not from app settings.
 
 `COSMOS_DB_HEALTH_CONTAINER_NAME` defaults to the raw container. If the Apple Health API writes to a separate container, set this to that container name. If it uses a separate Cosmos account or database, set `COSMOS_DB_HEALTH_CONNECTION_STRING` and `COSMOS_DB_HEALTH_DATABASE_NAME`. The scorer also understands the Apple Health API names `COSMOS_ENDPOINT`, `COSMOS_KEY`, `COSMOS_DATABASE`, and `COSMOS_CONTAINER`. Competition scoring reads `type = "apple-health-data"` rows and maps `active_energy_kcal` into the active-calorie score.
 
-`COSMOS_DB_COMPETITIONS_CONTAINER_NAME` defaults to `fitness_competitions`. Weekly scoring reads all active challenges, participants, and scoring rules from this container, then writes `weekly_score` documents back into it. `FITNESS_COMPETITION_CHALLENGE_ID` can still be used for local one-challenge scoring calls.
+`COSMOS_DB_COMPETITIONS_CONTAINER_NAME` defaults to `fitness_competitions`. Weekly scoring reads all active challenges, participants, users, forfeits, and scoring rules from this container, then writes `weekly_score` and leaderboard documents back into it.
 
-`FITNESS_COMPETITION_AI_LEADERBOARD_KIND` controls which leaderboard type the AI Telegram message uses when you call the AI summary manually. Supported values are `week`, `month`, and `final`; it defaults to `week`. The Azure timer functions pass the kind directly, so the scheduled weekly/monthly/final messages do not depend on this setting.
+Challenge selection, user identity, and leaderboard kind are database/application data rather than secrets. The scheduled jobs read active challenge documents from Cosmos. Weekly/monthly/final timers pass the leaderboard kind directly.
 
 Raw fitness data is challenge-independent and keyed by `userID`, so it can be captured even when the user is not currently in a challenge. Participant documents should keep `participantId` for competition identity and include `userID` to map that participant to raw data. If `userID` is missing, scoring falls back to `displayName`.
 
@@ -124,9 +126,52 @@ User docs hold long-lived profile and target data:
   "timezone": "Europe/London",
   "goalWeightKg": 87,
   "weeklyCalorieTarget": 16800,
+  "syncSources": {
+    "renpho": {
+      "enabled": true,
+      "credentialRef": "jack"
+    },
+    "fatsecret": {
+      "enabled": true,
+      "credentialRef": "jack"
+    },
+    "appleHealth": {
+      "enabled": true
+    }
+  },
   "active": true
 }
 ```
+
+Use the same shape for Ash with `credentialRef: "ash"` once his source credentials are available. If Ash should only use Apple Health for now, keep Renpho/FatSecret disabled:
+
+```json
+{
+  "id": "user_ash",
+  "type": "user",
+  "userID": "Ash",
+  "displayName": "Ash",
+  "timezone": "Europe/London",
+  "goalWeightKg": 90,
+  "weeklyCalorieTarget": 16000,
+  "syncSources": {
+    "renpho": {
+      "enabled": false,
+      "credentialRef": "ash"
+    },
+    "fatsecret": {
+      "enabled": false,
+      "credentialRef": "ash"
+    },
+    "appleHealth": {
+      "enabled": true
+    }
+  },
+  "active": true
+}
+```
+
+`credentialRef` maps to Function App setting names by uppercasing the ref. For example, `credentialRef: "ash"` maps to `RENPHO_ASH_EMAIL`, `RENPHO_ASH_PASSWORD`, `FATSECRET_ASH_ACCESS_TOKEN`, and related FatSecret settings. The older generic Jack settings `MY_EMAIL`, `MY_PASSWORD`, `FATSECRET_ACCESS_TOKEN`, and `FATSECRET_ACCESS_SECRET` still work as fallback for Jack only, but the per-user names above are preferred.
 
 Challenge docs define the competition:
 
