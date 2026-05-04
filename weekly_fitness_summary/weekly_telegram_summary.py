@@ -373,7 +373,11 @@ def _normalise_leaderboard_kind(leaderboard_kind: str | None = None) -> str:
     return selected_kind
 
 
-def get_latest_competition_leaderboard(leaderboard_kind: str | None = None) -> dict[str, Any] | None:
+def get_latest_competition_leaderboard(
+    leaderboard_kind: str | None = None,
+    today: date | None = None,
+) -> dict[str, Any] | None:
+    today = today or date.today()
     container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
     leaderboard_kind = _normalise_leaderboard_kind(leaderboard_kind)
     leaderboard_type = f"leaderboard_{leaderboard_kind}"
@@ -381,12 +385,24 @@ def get_latest_competition_leaderboard(leaderboard_kind: str | None = None) -> d
     leaderboards = _query_cosmos(
         container_name,
         (
-            "SELECT TOP 1 * FROM c WHERE c.type = @leaderboardType "
+            "SELECT TOP 10 * FROM c WHERE c.type = @leaderboardType "
+            "AND c.periodEndDate <= @today "
             "ORDER BY c.periodEndDate DESC"
         ),
-        [{"name": "@leaderboardType", "value": leaderboard_type}],
+        [
+            {"name": "@leaderboardType", "value": leaderboard_type},
+            {"name": "@today", "value": today.isoformat()},
+        ],
     )
-    return _compact_for_prompt(leaderboards[0]) if leaderboards else None
+    for leaderboard in leaderboards:
+        challenge_id = leaderboard.get("challengeID") or leaderboard.get("challengeId")
+        challenge = get_competition_challenge(challenge_id) if challenge_id else None
+        challenge_start = challenge.get("startDate") if challenge else None
+        period_start = leaderboard.get("periodStartDate") or leaderboard.get("weekStartDate")
+        if challenge_start and period_start and period_start < challenge_start:
+            continue
+        return _compact_for_prompt(leaderboard)
+    return None
 
 
 def get_competition_challenge(challenge_id: str) -> dict[str, Any] | None:
@@ -592,7 +608,7 @@ def _build_competition_ai_payload(
 ) -> dict[str, Any] | None:
     today = today or date.today()
     requested_kind = _normalise_leaderboard_kind(leaderboard_kind)
-    leaderboard = get_latest_competition_leaderboard(requested_kind)
+    leaderboard = get_latest_competition_leaderboard(requested_kind, today)
     if not leaderboard:
         return None
 
@@ -638,6 +654,9 @@ def _build_ai_user_prompt(payload: dict[str, Any], is_competition_message: bool)
             "Use only the supplied data. Keep it under 1800 characters. "
             "The leaderboard may be weekly, monthly, or final; use leaderboard_kind, type, "
             "periodStartDate/periodEndDate, and the period-specific points field in rankings. "
+            "Use each score document's points object as the source of truth for awarded points. "
+            "capsApplied are ceilings caused by missing data, not bonus points or minimum awarded points. "
+            "Do not say a participant received capped, minimum, or minimal points unless the points object shows those points were actually awarded. "
             "Lean into friendly rivalry and competitive spirit, but stay encouraging and factual. "
             "Use playful sub-headings and tasteful emoji. Avoid generic coaching language. "
             "Include these sections: "
@@ -645,7 +664,8 @@ def _build_ai_user_prompt(payload: dict[str, Any], is_competition_message: bool)
             "2) The scoreboard: rank, period points, and season points to date. "
             "3) Score breakdown: explain each participant's contributing weekly scores/category explanations. "
             "4) The swing factor: compare the biggest winning and losing score drivers. "
-            "5) The forfeit: if forfeit_for_period is supplied, clearly name the loser and the relevant forfeit. "
+            "5) The forfeit: if forfeit_for_period and forfeit_loser are supplied, clearly name the loser and the relevant forfeit. "
+            "If forfeit_for_period is supplied but forfeit_loser is missing because of a tie or single-participant board, say no forfeit is assigned. "
             "For weekly forfeits, include the supplied acknowledgement message template if it fits naturally. "
             "For monthly/final forfeits, describe the item, cost limit, or logistics details if supplied. "
             "6) Next moves: for weekly/monthly leaderboards, give one or two practical improvement actions for the next period; "

@@ -246,9 +246,15 @@ def _week_start_for(reference_date: date, week_starts_on: str) -> date:
 
 def previous_completed_week(challenge: dict[str, Any], today: date | None = None) -> tuple[date, date]:
     today = today or date.today()
-    reference_date = today - timedelta(days=1)
+    current_week_start = _week_start_for(today, challenge.get("weekStartsOn", "SUNDAY"))
+    reference_date = current_week_start - timedelta(days=1)
     week_start = _week_start_for(reference_date, challenge.get("weekStartsOn", "SUNDAY"))
     return week_start, week_start + timedelta(days=6)
+
+
+def _challenge_has_started(challenge: dict[str, Any], today: date | None = None) -> bool:
+    today = today or date.today()
+    return _challenge_start(challenge) <= today
 
 
 def get_raw_records(user_id: str, week_start: date, week_end: date) -> list[dict[str, Any]]:
@@ -442,9 +448,10 @@ def score_category(
     min_data_points = category_rules.get("minDataPoints")
     data_point_type = category_rules.get("dataPointType")
 
-    if metric_name == "averageDailyCalorieVariance" and min_data_points is None:
-        min_data_points = 5
+    if metric_name == "averageDailyCalorieVariance" and data_point_type is None:
         data_point_type = "foodLoggedDays"
+        if min_data_points is None:
+            min_data_points = 5
 
     data_points = _data_point_count(data_point_type, metrics) if data_point_type else None
 
@@ -627,10 +634,15 @@ def _weekly_wins_to_date(score_documents: list[dict[str, Any]]) -> dict[str, int
 
     for week_scores in scores_by_week.values():
         max_points = max(_score_total(score_document) for score_document in week_scores)
-        for score_document in week_scores:
-            if _score_total(score_document) == max_points:
-                participant_id = score_document["participantId"]
-                wins_by_participant[participant_id] = wins_by_participant.get(participant_id, 0) + 1
+        winning_scores = [
+            score_document
+            for score_document in week_scores
+            if _score_total(score_document) == max_points
+        ]
+        if len(winning_scores) != 1:
+            continue
+        participant_id = winning_scores[0]["participantId"]
+        wins_by_participant[participant_id] = wins_by_participant.get(participant_id, 0) + 1
 
     return wins_by_participant
 
@@ -764,6 +776,9 @@ def build_leaderboard_document(
 
     published_at = published_at or _utc_now()
 
+    top_score = rankings[0]["periodPoints"] if rankings else None
+    bottom_score = rankings[-1]["periodPoints"] if len(rankings) > 1 else None
+
     return {
         "id": _leaderboard_id(challenge_id, leaderboard_kind, period_start),
         "type": _leaderboard_type(leaderboard_kind),
@@ -777,8 +792,8 @@ def build_leaderboard_document(
         "status": "published",
         "version": 1,
         "rankings": rankings,
-        "winnerParticipantId": rankings[0]["participantId"] if rankings else None,
-        "loserParticipantId": rankings[-1]["participantId"] if rankings else None,
+        "winnerParticipantId": _unique_participant_at_score(rankings, top_score),
+        "loserParticipantId": _unique_participant_at_score(rankings, bottom_score),
         "telegramMessageId": None,
         "publishedAt": published_at,
     }
@@ -808,6 +823,22 @@ def _scores_in_period(
         for score_document in score_records
         if period_start <= _parse_date(score_document["weekEndDate"]) <= period_end
     ]
+
+
+def _unique_participant_at_score(
+    rankings: list[dict[str, Any]],
+    score: int | None,
+) -> str | None:
+    if score is None:
+        return None
+    matching_rankings = [
+        ranking
+        for ranking in rankings
+        if int(ranking.get("periodPoints", 0)) == score
+    ]
+    if len(matching_rankings) != 1:
+        return None
+    return matching_rankings[0]["participantId"]
 
 
 def build_leaderboard_documents_for_periods(
@@ -906,10 +937,16 @@ def score_week(
     today: date | None = None,
 ) -> list[dict[str, Any]]:
     challenge = get_active_challenge(challenge_id)
+    if week_start is None and not _challenge_has_started(challenge, today):
+        return []
+
     if week_start is None:
         week_start, week_end = previous_completed_week(challenge, today)
     else:
         week_end = week_start + timedelta(days=6)
+
+    if week_end < _challenge_start(challenge):
+        return []
 
     scoring_rules = get_scoring_rules(challenge["challengeID"], challenge["scoringVersion"])
     participants = get_challenge_participants(challenge)
@@ -956,7 +993,13 @@ def score_active_challenges(today: date | None = None) -> list[dict[str, Any]]:
     saved_scores: list[dict[str, Any]] = []
 
     for challenge in get_active_challenges():
+        if not _challenge_has_started(challenge, today):
+            continue
+
         week_start, week_end = previous_completed_week(challenge, today)
+        if week_end < _challenge_start(challenge):
+            continue
+
         scoring_rules = get_scoring_rules(challenge["challengeID"], challenge["scoringVersion"])
         participants = get_challenge_participants(challenge)
         competition_container = _competitions_container()
