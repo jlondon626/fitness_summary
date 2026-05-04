@@ -2,7 +2,7 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 import telegram
@@ -357,6 +357,10 @@ def _query_cosmos(container_name: str, query: str, parameters: list[dict[str, An
     )
 
 
+def _utc_now() -> str:
+    return datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z")
+
+
 LEADERBOARD_KINDS = {"week", "month", "final"}
 FORFEIT_KEYS_BY_LEADERBOARD_KIND = {
     "week": "weekly",
@@ -652,6 +656,44 @@ def _build_competition_ai_payload(
     }
 
 
+def persist_competition_ai_message(payload: dict[str, Any], message: str) -> dict[str, Any]:
+    leaderboard = payload["leaderboard"]
+    challenge_id = leaderboard.get("challengeID") or leaderboard.get("challengeId")
+    leaderboard_id = leaderboard["id"]
+    generated_at = _utc_now()
+    message_document = {
+        "id": f"{leaderboard_id}__ai_message",
+        "type": "leaderboard_ai_message",
+        "challengeID": challenge_id,
+        "challengeId": challenge_id,
+        "leaderboardId": leaderboard_id,
+        "leaderboardType": leaderboard.get("type"),
+        "leaderboardKind": leaderboard.get("leaderboardKind"),
+        "periodStartDate": leaderboard.get("periodStartDate") or leaderboard.get("weekStartDate"),
+        "periodEndDate": leaderboard.get("periodEndDate") or leaderboard.get("weekEndDate"),
+        "status": "generated",
+        "channel": "telegram",
+        "message": message,
+        "modelDeployment": os.getenv("AZURE_OPENAI_DEPLOYMENT"),
+        "generatedAt": generated_at,
+        "version": 1,
+    }
+
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    container = _cosmos_container(container_name)
+    saved_message = container.upsert_item(message_document)
+
+    leaderboard_update = {
+        **leaderboard,
+        "aiMessageId": saved_message["id"],
+        "aiMessageGeneratedAt": generated_at,
+        "aiMessageStatus": "generated",
+        "aiMessage": message,
+    }
+    container.upsert_item(leaderboard_update)
+    return _compact_for_prompt(saved_message)
+
+
 def _build_ai_user_prompt(payload: dict[str, Any], is_competition_message: bool) -> str:
     if is_competition_message:
         return (
@@ -722,6 +764,7 @@ async def build_ai_feedback_message(
     today: date | None = None,
     leaderboard_kind: str | None = None,
     competition_only: bool = False,
+    persist_competition_message: bool = True,
 ) -> str:
     deployment = _required_env("AZURE_OPENAI_DEPLOYMENT")
     competition_payload = _build_competition_ai_payload(today, leaderboard_kind)
@@ -761,7 +804,12 @@ async def build_ai_feedback_message(
     if not content:
         raise RuntimeError("Azure OpenAI returned an empty response")
     heading = "Competition leaderboard feedback" if is_competition_message else "AI coaching feedback"
-    return f"{heading}\n{content.strip()}"
+    message = f"{heading}\n{content.strip()}"
+
+    if is_competition_message and persist_competition_message:
+        persist_competition_ai_message(competition_payload, message)
+
+    return message
 
 
 async def send_telegram_message(message: str) -> None:

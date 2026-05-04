@@ -891,6 +891,51 @@ def build_leaderboard_documents_for_periods(
     return leaderboard_documents
 
 
+def apply_weekly_leaderboard_tallies_to_scores(
+    score_records: list[dict[str, Any]],
+    leaderboard_document: dict[str, Any],
+) -> list[dict[str, Any]]:
+    if leaderboard_document.get("leaderboardKind") != "week":
+        return []
+
+    score_records_by_id = {
+        score_document["id"]: score_document
+        for score_document in score_records
+        if score_document.get("type") == "weekly_score"
+    }
+    updated_scores: list[dict[str, Any]] = []
+
+    for ranking in leaderboard_document.get("rankings", []):
+        running_tally = {
+            "rank": ranking.get("rank"),
+            "weeklyPoints": ranking.get("weeklyPoints"),
+            "seasonPointsToDate": ranking.get("seasonPointsToDate"),
+            "weeklyWinsToDate": ranking.get("weeklyWinsToDate"),
+            "leaderboardId": leaderboard_document.get("id"),
+            "leaderboardKind": leaderboard_document.get("leaderboardKind"),
+            "periodStartDate": leaderboard_document.get("periodStartDate"),
+            "periodEndDate": leaderboard_document.get("periodEndDate"),
+        }
+
+        for score_document_id in ranking.get("scoreDocumentIds", []):
+            score_document = score_records_by_id.get(score_document_id)
+            if not score_document:
+                continue
+
+            score_document.update(
+                {
+                    "latestRank": ranking.get("rank"),
+                    "latestLeaderboardId": leaderboard_document.get("id"),
+                    "seasonPointsToDate": ranking.get("seasonPointsToDate"),
+                    "weeklyWinsToDate": ranking.get("weeklyWinsToDate"),
+                    "runningTally": running_tally,
+                }
+            )
+            updated_scores.append(score_document)
+
+    return updated_scores
+
+
 def build_weekly_score_document(
     challenge: dict[str, Any],
     participant: dict[str, Any],
@@ -995,6 +1040,8 @@ def score_week(
         week_end,
         score_records_to_date,
     ):
+        for updated_score in apply_weekly_leaderboard_tallies_to_scores(score_records_to_date, leaderboard_document):
+            saved_scores.append(competition_container.upsert_item(updated_score))
         saved_scores.append(competition_container.upsert_item(leaderboard_document))
 
     return saved_scores
@@ -1046,6 +1093,8 @@ def score_active_challenges(today: date | None = None) -> list[dict[str, Any]]:
             week_end,
             score_records_to_date,
         ):
+            for updated_score in apply_weekly_leaderboard_tallies_to_scores(score_records_to_date, leaderboard_document):
+                saved_scores.append(competition_container.upsert_item(updated_score))
             saved_scores.append(competition_container.upsert_item(leaderboard_document))
 
     return saved_scores

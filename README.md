@@ -111,6 +111,43 @@ Weekly score documents include a presentation-friendly `points` summary, per-cat
 
 After weekly scores are written, the scorer writes leaderboard documents by adding together existing weekly scores. It creates `leaderboard_week` and `leaderboard_month` documents on each scoring run, plus `leaderboard_final` once the scored period reaches the challenge end date. If a Sunday-start challenge also has a Sunday `endDate`, the final leaderboard becomes available after the Saturday scoring window immediately before that Sunday. Leaderboards keep `participantId` because they are competition outputs; raw fitness data remains keyed only by `userID`.
 
+The scorer also writes the latest running tally back onto the current weekly score documents so a scores endpoint can display current standings without recomputing totals:
+
+```json
+{
+  "seasonPointsToDate": 3,
+  "weeklyWinsToDate": 1,
+  "latestRank": 1,
+  "latestLeaderboardId": "challenge_2026_05_04__2026-05-10__leaderboard_week",
+  "runningTally": {
+    "rank": 1,
+    "weeklyPoints": 3,
+    "seasonPointsToDate": 3,
+    "weeklyWinsToDate": 1,
+    "leaderboardKind": "week"
+  }
+}
+```
+
+Competition AI messages are stored in the competition container as `leaderboard_ai_message` documents and linked from the leaderboard:
+
+```json
+{
+  "id": "challenge_2026_05_04__2026-05-10__leaderboard_week__ai_message",
+  "type": "leaderboard_ai_message",
+  "challengeID": "challenge_2026_05_04",
+  "leaderboardId": "challenge_2026_05_04__2026-05-10__leaderboard_week",
+  "leaderboardKind": "week",
+  "periodStartDate": "2026-05-10",
+  "periodEndDate": "2026-05-16",
+  "channel": "telegram",
+  "message": "Competition leaderboard feedback\n...",
+  "generatedAt": "2026-05-17T07:30:00Z"
+}
+```
+
+The corresponding leaderboard document also gets `aiMessageId`, `aiMessageGeneratedAt`, `aiMessageStatus`, and `aiMessage` fields for simple frontend reads.
+
 ## Competition Data Model
 
 The recommended competition model separates users from challenge membership.
@@ -324,7 +361,7 @@ AzureWebJobsStorage=<storage connection string>
 - The calorie deficit/surplus compares total logged calories against the configured daily calorie target multiplied by the number of logged days.
 - Competition scoring treats percentage bands as `minPct <= value < maxPct`. Keep scoring-rule percentage bands contiguous to avoid unscored gaps.
 - If `calorieAdherence` has no `minDataPoints`, scoring defaults to a 5 logged-day guard and score documents include a warning. Add the guard to the rules explicitly to make the config self-documenting.
-- The AI feedback prompt is competition-first. It reads the latest selected leaderboard type, matching `weekly_score` documents for that leaderboard period, the challenge, forfeits, scoring rules, participants, and compact raw fitness records. If no leaderboard exists yet, it falls back to the computed Renpho/FatSecret summaries and recent Cosmos DB records.
+- The AI feedback prompt is competition-first. It reads the latest selected leaderboard type, matching `weekly_score` documents for that leaderboard period, the challenge, forfeits, scoring rules, participants, and compact raw fitness records. If no leaderboard exists yet, it falls back to the computed Renpho/FatSecret summaries and recent Cosmos DB records. Competition leaderboard AI messages are persisted to Cosmos for frontend and historical display.
 
 ## Security
 
