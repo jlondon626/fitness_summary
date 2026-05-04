@@ -34,8 +34,11 @@ jobs:
         run: |
           zip -r release.zip . \
             -x "venv/*" \
+            -x ".venv/*" \
             -x ".git/*" \
             -x ".github/*" \
+            -x ".env" \
+            -x ".tmp/*" \
             -x "__pycache__/*" \
             -x "*.pyc"
 

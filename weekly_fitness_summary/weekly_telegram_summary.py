@@ -57,6 +57,13 @@ def _optional_int_env(name: str, default: int) -> int:
     except ValueError as exc:
         raise RuntimeError(f"{name} must be an integer") from exc
 
+
+def _optional_env(name: str, default: str) -> str:
+    value = os.getenv(name)
+    if not value:
+        return default
+    return value.strip().strip('"')
+
 def build_compact_ai_payload(payload: dict[str, Any]) -> dict[str, Any]:
     """
     Converts verbose raw Cosmos workout records into a compact payload suitable
@@ -333,6 +340,349 @@ def get_cosmos_fitness_records() -> list[dict[str, Any]]:
     return [_compact_for_prompt(record) for record in records[:item_limit]]
 
 
+def _cosmos_container(container_name: str):
+    client = CosmosClient.from_connection_string(_required_env("COSMOS_DB_CONNECTION_STRING"))
+    database = client.get_database_client(_required_env("COSMOS_DB_DATABASE_NAME"))
+    return database.get_container_client(container_name)
+
+
+def _query_cosmos(container_name: str, query: str, parameters: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    container = _cosmos_container(container_name)
+    return list(
+        container.query_items(
+            query=query,
+            parameters=parameters,
+            enable_cross_partition_query=True,
+        )
+    )
+
+
+LEADERBOARD_KINDS = {"week", "month", "final"}
+FORFEIT_KEYS_BY_LEADERBOARD_KIND = {
+    "week": "weekly",
+    "month": "monthly",
+    "final": "championship",
+}
+
+
+def _normalise_leaderboard_kind(leaderboard_kind: str | None = None) -> str:
+    selected_kind = leaderboard_kind or _optional_env("FITNESS_COMPETITION_AI_LEADERBOARD_KIND", "week")
+    selected_kind = selected_kind.strip().strip('"').lower()
+    if selected_kind not in LEADERBOARD_KINDS:
+        raise RuntimeError("leaderboard kind must be one of: week, month, final")
+    return selected_kind
+
+
+def get_latest_competition_leaderboard(leaderboard_kind: str | None = None) -> dict[str, Any] | None:
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    challenge_id = os.getenv("FITNESS_COMPETITION_CHALLENGE_ID")
+    leaderboard_kind = _normalise_leaderboard_kind(leaderboard_kind)
+    parameters = []
+    challenge_filter = ""
+    leaderboard_type = f"leaderboard_{leaderboard_kind}"
+
+    if challenge_id:
+        challenge_filter = "AND c.challengeID = @challengeID"
+        parameters.append({"name": "@challengeID", "value": challenge_id.strip().strip('"')})
+
+    parameters.append({"name": "@leaderboardType", "value": leaderboard_type})
+
+    leaderboards = _query_cosmos(
+        container_name,
+        (
+            "SELECT TOP 1 * FROM c WHERE c.type = @leaderboardType "
+            f"{challenge_filter} ORDER BY c.periodEndDate DESC"
+        ),
+        parameters,
+    )
+    return _compact_for_prompt(leaderboards[0]) if leaderboards else None
+
+
+def get_competition_challenge(challenge_id: str) -> dict[str, Any] | None:
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    challenges = _query_cosmos(
+        container_name,
+        "SELECT TOP 1 * FROM c WHERE c.type = 'challenge' AND c.challengeID = @challengeID",
+        [{"name": "@challengeID", "value": challenge_id}],
+    )
+    return _compact_for_prompt(challenges[0]) if challenges else None
+
+
+def get_selected_competition_challenge() -> dict[str, Any] | None:
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    challenge_id = os.getenv("FITNESS_COMPETITION_CHALLENGE_ID")
+
+    if challenge_id:
+        return get_competition_challenge(challenge_id.strip().strip('"'))
+
+    challenges = _query_cosmos(
+        container_name,
+        "SELECT TOP 1 * FROM c WHERE c.type = 'challenge' AND c.status = 'active' ORDER BY c.startDate DESC",
+        [],
+    )
+    return _compact_for_prompt(challenges[0]) if challenges else None
+
+
+def get_competition_period_scores(
+    challenge_id: str,
+    period_start: str,
+    period_end: str,
+) -> list[dict[str, Any]]:
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    scores = _query_cosmos(
+        container_name,
+        (
+            "SELECT * FROM c WHERE c.type = 'weekly_score' "
+            "AND c.challengeID = @challengeID "
+            "AND c.weekEndDate >= @periodStart "
+            "AND c.weekEndDate <= @periodEnd"
+        ),
+        [
+            {"name": "@challengeID", "value": challenge_id},
+            {"name": "@periodStart", "value": period_start},
+            {"name": "@periodEnd", "value": period_end},
+        ],
+    )
+    return [_compact_for_prompt(score) for score in scores]
+
+
+def get_competition_scoring_rules(challenge_id: str, scoring_version: str | None) -> dict[str, Any] | None:
+    if not scoring_version:
+        return None
+
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    rules = _query_cosmos(
+        container_name,
+        (
+            "SELECT TOP 1 * FROM c WHERE c.type = 'scoring_rules' "
+            "AND c.challengeID = @challengeID "
+            "AND c.scoringVersion = @scoringVersion"
+        ),
+        [
+            {"name": "@challengeID", "value": challenge_id},
+            {"name": "@scoringVersion", "value": scoring_version},
+        ],
+    )
+    return _compact_for_prompt(rules[0]) if rules else None
+
+
+def get_competition_participants(challenge_id: str) -> list[dict[str, Any]]:
+    container_name = _optional_env("COSMOS_DB_COMPETITIONS_CONTAINER_NAME", "fitness_competitions")
+    participants = _query_cosmos(
+        container_name,
+        (
+            "SELECT * FROM c WHERE (c.type = 'participant' OR c.type = 'challenge_participant') "
+            "AND c.challengeID = @challengeID AND (NOT IS_DEFINED(c.active) OR c.active = true)"
+        ),
+        [{"name": "@challengeID", "value": challenge_id}],
+    )
+    if not participants:
+        challenges = _query_cosmos(
+            container_name,
+            "SELECT TOP 1 * FROM c WHERE c.type = 'challenge' AND c.challengeID = @challengeID",
+            [{"name": "@challengeID", "value": challenge_id}],
+        )
+        participants = [
+            {
+                "id": f"{challenge_id}__{user_id}",
+                "type": "challenge_participant",
+                "challengeID": challenge_id,
+                "userID": user_id,
+                "active": True,
+            }
+            for user_id in (challenges[0].get("participants", []) if challenges else [])
+        ]
+
+    enriched_participants = []
+    for participant in participants:
+        user_id = participant.get("rawUserID") or participant.get("userID") or participant.get("displayName")
+        user_profile = None
+        if user_id:
+            users = _query_cosmos(
+                container_name,
+                "SELECT TOP 1 * FROM c WHERE c.type = 'user' AND (c.userID = @userID OR c.id = @userID)",
+                [{"name": "@userID", "value": user_id}],
+            )
+            user_profile = users[0] if users else None
+
+        enriched_participants.append(
+            {
+                **(user_profile or {}),
+                **participant,
+                "userID": (user_profile or {}).get("userID") or user_id,
+                "displayName": participant.get("displayName") or (user_profile or {}).get("displayName") or user_id,
+                "participantId": participant.get("participantId") or participant.get("id") or f"{challenge_id}__{user_id}",
+            }
+        )
+
+    return [_compact_for_prompt(participant) for participant in enriched_participants]
+
+
+def get_competition_raw_records(
+    participants: list[dict[str, Any]],
+    period_start: str,
+    period_end: str,
+) -> list[dict[str, Any]]:
+    container_name = _optional_env("COSMOS_DB_RAW_CONTAINER_NAME", "fitness_raw")
+    records: list[dict[str, Any]] = []
+
+    for participant in participants:
+        user_id = participant.get("rawUserID") or participant.get("userID") or participant.get("displayName")
+        if not user_id:
+            continue
+
+        records.extend(
+            _query_cosmos(
+                container_name,
+                (
+                    "SELECT * FROM c WHERE c.userID = @userID "
+                    "AND c.date >= @periodStart AND c.date <= @periodEnd"
+                ),
+                [
+                    {"name": "@userID", "value": user_id},
+                    {"name": "@periodStart", "value": period_start},
+                    {"name": "@periodEnd", "value": period_end},
+                ],
+            )
+        )
+
+    return [_compact_for_prompt(record, max_string_length=200) for record in records[:100]]
+
+
+def _parse_iso_date(value: str) -> date:
+    return datetime.strptime(value, "%Y-%m-%d").date()
+
+
+def _last_sunday_on_or_before(value: date) -> date:
+    days_since_sunday = (value.weekday() - 6) % 7
+    return value - timedelta(days=days_since_sunday)
+
+
+def _is_first_sunday_after_month_end(value: date) -> bool:
+    return value.weekday() == 6 and value.day <= 7
+
+
+def get_due_competition_leaderboard_kind(today: date | None = None) -> str:
+    today = today or date.today()
+    challenge = get_selected_competition_challenge()
+
+    if challenge and challenge.get("endDate") and today == _last_sunday_on_or_before(_parse_iso_date(challenge["endDate"])):
+        return "final"
+    if _is_first_sunday_after_month_end(today):
+        return "month"
+    return "week"
+
+
+def should_send_competition_leaderboard(leaderboard_kind: str, today: date | None = None) -> bool:
+    return _normalise_leaderboard_kind(leaderboard_kind) == get_due_competition_leaderboard_kind(today)
+
+
+def _forfeit_for_leaderboard(challenge: dict[str, Any] | None, leaderboard_kind: str) -> dict[str, Any] | None:
+    if not challenge:
+        return None
+    forfeits = challenge.get("forfeits") or {}
+    forfeit = forfeits.get(FORFEIT_KEYS_BY_LEADERBOARD_KIND[leaderboard_kind])
+    if not forfeit or not forfeit.get("enabled", False):
+        return None
+    return forfeit
+
+
+def _ranking_for_participant(leaderboard: dict[str, Any], participant_id: str | None) -> dict[str, Any] | None:
+    if not participant_id:
+        return None
+    return next(
+        (
+            ranking
+            for ranking in leaderboard.get("rankings", [])
+            if ranking.get("participantId") == participant_id
+        ),
+        None,
+    )
+
+
+def _build_competition_ai_payload(
+    today: date | None = None,
+    leaderboard_kind: str | None = None,
+) -> dict[str, Any] | None:
+    today = today or date.today()
+    requested_kind = _normalise_leaderboard_kind(leaderboard_kind)
+    leaderboard = get_latest_competition_leaderboard(requested_kind)
+    if not leaderboard:
+        return None
+
+    challenge_id = leaderboard.get("challengeID") or leaderboard.get("challengeId")
+    period_start = leaderboard.get("periodStartDate") or leaderboard.get("weekStartDate")
+    period_end = leaderboard.get("periodEndDate") or leaderboard.get("weekEndDate")
+    leaderboard_kind = leaderboard.get("leaderboardKind") or leaderboard.get("type", "leaderboard_week").removeprefix("leaderboard_")
+    scores = get_competition_period_scores(challenge_id, period_start, period_end)
+    scoring_version = next((score.get("scoringVersion") for score in scores if score.get("scoringVersion")), None)
+    participants = get_competition_participants(challenge_id)
+    challenge = get_competition_challenge(challenge_id)
+    forfeit = _forfeit_for_leaderboard(challenge, leaderboard_kind)
+    loser_ranking = _ranking_for_participant(leaderboard, leaderboard.get("loserParticipantId"))
+
+    return {
+        "report_date": today.isoformat(),
+        "message_type": "competition_leaderboard_results",
+        "leaderboard_kind": leaderboard_kind,
+        "period": {
+            "start_date": period_start,
+            "end_date": period_end,
+        },
+        "challenge": challenge,
+        "leaderboard": leaderboard,
+        "forfeit_for_period": forfeit,
+        "forfeit_loser": loser_ranking,
+        "weekly_scores_in_period": scores,
+        "scoring_rules": get_competition_scoring_rules(challenge_id, scoring_version),
+        "participants": participants,
+        "raw_fitness_records": get_competition_raw_records(participants, period_start, period_end),
+        "instruction": (
+            "Create a concise Telegram leaderboard results message for the leaderboard period. "
+            "Explain why each participant got their score, what drove the winning and losing result, "
+            "and how each participant can improve in the next relevant period."
+        ),
+    }
+
+
+def _build_ai_user_prompt(payload: dict[str, Any], is_competition_message: bool) -> str:
+    if is_competition_message:
+        return (
+            "Create a fun, Telegram-friendly competition leaderboard results message from this JSON. "
+            "Use only the supplied data. Keep it under 1800 characters. "
+            "The leaderboard may be weekly, monthly, or final; use leaderboard_kind, type, "
+            "periodStartDate/periodEndDate, and the period-specific points field in rankings. "
+            "Lean into friendly rivalry and competitive spirit, but stay encouraging and factual. "
+            "Use playful sub-headings and tasteful emoji. Avoid generic coaching language. "
+            "Include these sections: "
+            "1) A short hype/commentary opener that captures the story of the leaderboard period. "
+            "2) The scoreboard: rank, period points, and season points to date. "
+            "3) Score breakdown: explain each participant's contributing weekly scores/category explanations. "
+            "4) The swing factor: compare the biggest winning and losing score drivers. "
+            "5) The forfeit: if forfeit_for_period is supplied, clearly name the loser and the relevant forfeit. "
+            "For weekly forfeits, include the supplied acknowledgement message template if it fits naturally. "
+            "For monthly/final forfeits, describe the item, cost limit, or logistics details if supplied. "
+            "6) Next moves: for weekly/monthly leaderboards, give one or two practical improvement actions for the next period; "
+            "for final leaderboards, summarize the decisive patterns and lessons for the next challenge. "
+            "Mention missing/incomplete data where it affects scoring. "
+            "A little banter is fine; do not insult anyone or overstate conclusions. "
+            "Do not include raw JSON. Avoid medical claims.\n\n"
+            f"{json.dumps(payload, default=str, ensure_ascii=False)}"
+        )
+
+    return (
+        "Create a concise Telegram-friendly weekly coaching note from this JSON. "
+        "Use only the supplied data. Keep it under 1200 characters. "
+        "Include these sections: "
+        "1) Previous week: specific feedback on weight, nutrition, and training. "
+        "2) Week ahead: practical advice for calories, protein, consistency, and recovery. "
+        "3) Fitness session aims: suggest target weights/reps/structure only where supported by recent workout data; otherwise give clear progression rules. "
+        "4) Key focus: one measurable priority for the next 7 days. "
+        "If data is missing or incomplete, say so briefly. Avoid medical claims.\n\n"
+        f"{json.dumps(payload, default=str, ensure_ascii=False)}"
+    )
+
+
 def _build_ai_prompt_payload(today: date | None = None) -> dict[str, Any]:
     today = today or date.today()
     week_end = today - timedelta(days=1)
@@ -357,10 +707,19 @@ def _build_ai_prompt_payload(today: date | None = None) -> dict[str, Any]:
     }
 
 
-async def build_ai_feedback_message(today: date | None = None) -> str:
+async def build_ai_feedback_message(
+    today: date | None = None,
+    leaderboard_kind: str | None = None,
+    competition_only: bool = False,
+) -> str:
     deployment = _required_env("AZURE_OPENAI_DEPLOYMENT")
-    payload = _build_ai_prompt_payload(today)
-    compact_payload = build_compact_ai_payload(payload)
+    competition_payload = _build_competition_ai_payload(today, leaderboard_kind)
+    if competition_only and competition_payload is None:
+        selected_kind = _normalise_leaderboard_kind(leaderboard_kind)
+        raise RuntimeError(f"No {selected_kind} competition leaderboard found for AI summary.")
+
+    compact_payload = competition_payload or build_compact_ai_payload(_build_ai_prompt_payload(today))
+    is_competition_message = competition_payload is not None
 
     async with AsyncAzureOpenAI(
         api_key=_required_env("AZURE_OPENAI_API_KEY"),
@@ -373,35 +732,25 @@ async def build_ai_feedback_message(today: date | None = None) -> str:
                 {
                     "role": "system",
                     "content": (
-                        "You are a practical fitness coach. Use only the supplied data. "
-                        "Give concise, specific feedback on the previous week and clear advice for the week ahead. "
-                        "When recommending training targets, base them on recent logged sessions and avoid inventing exact weights. "
-                        "Do not diagnose medical conditions."
+                        "You are a practical fitness competition coach. Use only the supplied data. "
+                        "Give concise, specific feedback on leaderboard results, scoring drivers, and next-week improvements. "
+                        "Do not invent missing data. Do not diagnose medical conditions."
                     ),
                 },
                 {
                     "role": "user",
-                    "content": (
-                        "Create a concise Telegram-friendly weekly coaching note from this JSON. "
-                        "Use only the supplied data. Keep it under 1200 characters. "
-                        "Include these sections: "
-                        "1) Previous week: specific feedback on weight, nutrition, and training. "
-                        "2) Week ahead: practical advice for calories, protein, consistency, and recovery. "
-                        "3) Fitness session aims: suggest target weights/reps/structure only where supported by recent workout data; otherwise give clear progression rules. "
-                        "4) Key focus: one measurable priority for the next 7 days. "
-                        "If data is missing or incomplete, say so briefly. Avoid medical claims.\n\n"
-                        f"{json.dumps(compact_payload, default=str, ensure_ascii=False)}"
-                    ),
+                    "content": _build_ai_user_prompt(compact_payload, is_competition_message),
                 },
             ],
-            max_tokens=450,
+            max_tokens=650 if is_competition_message else 450,
             temperature=0.4,
         )
 
     content = completion.choices[0].message.content
     if not content:
         raise RuntimeError("Azure OpenAI returned an empty response")
-    return f"AI coaching feedback\n{content.strip()}"
+    heading = "Competition leaderboard feedback" if is_competition_message else "AI coaching feedback"
+    return f"{heading}\n{content.strip()}"
 
 
 async def send_telegram_message(message: str) -> None:
@@ -425,6 +774,12 @@ async def send_ai_feedback_summary() -> None:
     await send_telegram_message(await build_ai_feedback_message())
 
 
+async def send_competition_leaderboard_summary(leaderboard_kind: str) -> None:
+    await send_telegram_message(
+        await build_ai_feedback_message(leaderboard_kind=leaderboard_kind, competition_only=True)
+    )
+
+
 async def main() -> None:
     await send_weight_summary()
 
@@ -435,4 +790,3 @@ if __name__ == "__main__":
     compact_payload = build_compact_ai_payload(payload)
     with open("debug_payload.json", "w", encoding="utf-8") as f:
         json.dump(compact_payload, f, default=str, ensure_ascii=False, indent=2)
-
