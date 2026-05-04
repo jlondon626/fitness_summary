@@ -514,6 +514,11 @@ def get_competition_participants(challenge_id: str) -> list[dict[str, Any]]:
                 "userID": (user_profile or {}).get("userID") or user_id,
                 "displayName": participant.get("displayName") or (user_profile or {}).get("displayName") or user_id,
                 "participantId": participant.get("participantId") or participant.get("id") or f"{challenge_id}__{user_id}",
+                "averageDailyCalorieTarget": (
+                    participant.get("averageDailyCalorieTarget")
+                    or (user_profile or {}).get("averageDailyCalorieTarget")
+                ),
+                "weeklyCalorieTarget": participant.get("weeklyCalorieTarget") or (user_profile or {}).get("weeklyCalorieTarget"),
             }
         )
 

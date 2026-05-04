@@ -125,7 +125,7 @@ User docs hold long-lived profile and target data:
   "displayName": "Jack",
   "timezone": "Europe/London",
   "goalWeightKg": 87,
-  "weeklyCalorieTarget": 16800,
+  "averageDailyCalorieTarget": 2400,
   "syncSources": {
     "renpho": {
       "enabled": true,
@@ -153,7 +153,7 @@ Use the same shape for Ash with `credentialRef: "ash"` once his source credentia
   "displayName": "Ash",
   "timezone": "Europe/London",
   "goalWeightKg": 90,
-  "weeklyCalorieTarget": 16000,
+  "averageDailyCalorieTarget": 2300,
   "syncSources": {
     "renpho": {
       "enabled": false,
@@ -232,7 +232,7 @@ The scorer supports all of these participant sources for deployment safety:
 - new `type = "challenge_participant"` docs
 - `challenge.participants` arrays containing user IDs
 
-If a matching `type = "user"` doc exists, the scorer enriches challenge participants with `displayName`, `timezone`, `goalWeightKg`, and `weeklyCalorieTarget`. Challenge participant fields can override user fields when needed.
+If a matching `type = "user"` doc exists, the scorer enriches challenge participants with `displayName`, `timezone`, `goalWeightKg`, and `averageDailyCalorieTarget`. Challenge participant fields can override user fields when needed. `weeklyCalorieTarget` is still accepted as a backwards-compatible fallback for older user documents.
 
 The target values used in calculations are in:
 

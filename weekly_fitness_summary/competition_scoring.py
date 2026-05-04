@@ -182,6 +182,10 @@ def _normalise_participant(
         "displayName": participant.get("displayName") or user_profile.get("displayName") or user_id,
         "timezone": participant.get("timezone") or user_profile.get("timezone"),
         "goalWeightKg": participant.get("goalWeightKg") or participant.get("goalWeight") or user_profile.get("goalWeightKg"),
+        "averageDailyCalorieTarget": (
+            participant.get("averageDailyCalorieTarget")
+            or user_profile.get("averageDailyCalorieTarget")
+        ),
         "weeklyCalorieTarget": participant.get("weeklyCalorieTarget") or user_profile.get("weeklyCalorieTarget"),
     }
 
@@ -361,8 +365,10 @@ def build_weekly_metrics(
     if len(weights) >= 2 and weights[0] != 0:
         weekly_weight_change_pct = (weights[-1] - weights[0]) / weights[0]
 
-    weekly_calorie_target = participant.get("weeklyCalorieTarget")
-    daily_calorie_target = weekly_calorie_target / 7 if weekly_calorie_target else None
+    daily_calorie_target = participant.get("averageDailyCalorieTarget")
+    if daily_calorie_target is None and participant.get("weeklyCalorieTarget") is not None:
+        daily_calorie_target = float(participant["weeklyCalorieTarget"]) / 7
+    daily_calorie_target = float(daily_calorie_target) if daily_calorie_target is not None else None
     average_daily_calories = _average(
         [float(record.get("calories", 0)) for record in logged_food_days]
     )
