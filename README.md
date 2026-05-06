@@ -78,7 +78,7 @@ COSMOS_DB_CONNECTION_STRING=your_cosmos_connection_string
 COSMOS_DB_DATABASE_NAME=your_cosmos_database_name
 COSMOS_DB_CONTAINER_NAME=your_cosmos_container_name
 COSMOS_DB_RAW_CONTAINER_NAME=fitness_raw
-COSMOS_DB_HEALTH_CONTAINER_NAME=fitness_raw
+COSMOS_DB_HEALTH_CONTAINER_NAME=apple-health-data
 COSMOS_DB_HEALTH_CONNECTION_STRING=optional_separate_health_cosmos_connection_string
 COSMOS_DB_HEALTH_DATABASE_NAME=optional_separate_health_database_name
 COSMOS_DB_COMPETITIONS_CONTAINER_NAME=fitness_competitions
@@ -97,7 +97,7 @@ For Azure, add the same values as Function App application settings. Azure will 
 
 `COSMOS_DB_RAW_CONTAINER_NAME` defaults to `fitness_raw`. The daily raw sync writes one Renpho document and one FatSecret document per user/date using deterministic ids such as `renpho__user_jack__2026-05-04` and `fatsecret__user_jack__2026-05-04`. Users to sync are read from `fitness_competitions` user documents with enabled Renpho/FatSecret sources, not from app settings.
 
-`COSMOS_DB_HEALTH_CONTAINER_NAME` defaults to the raw container. If the Apple Health API writes to a separate container, set this to that container name. If it uses a separate Cosmos account or database, set `COSMOS_DB_HEALTH_CONNECTION_STRING` and `COSMOS_DB_HEALTH_DATABASE_NAME`. The scorer also understands the Apple Health API names `COSMOS_ENDPOINT`, `COSMOS_KEY`, `COSMOS_DATABASE`, and `COSMOS_CONTAINER`. Competition scoring reads `type = "apple-health-data"` rows and maps `active_energy_kcal` into the active-calorie score.
+`COSMOS_DB_HEALTH_CONTAINER_NAME` defaults to `apple-health-data`. If the Apple Health API uses a separate Cosmos account or database, set `COSMOS_DB_HEALTH_CONNECTION_STRING` and `COSMOS_DB_HEALTH_DATABASE_NAME`. The scorer also understands the Apple Health API names `COSMOS_ENDPOINT`, `COSMOS_KEY`, `COSMOS_DATABASE`, and `COSMOS_CONTAINER`. Competition scoring reads `type = "apple-health-data"` rows and maps positive `active_energy_kcal` values into the active-calorie score.
 
 `COSMOS_DB_COMPETITIONS_CONTAINER_NAME` defaults to `fitness_competitions`. Weekly scoring reads all active challenges, participants, users, forfeits, and scoring rules from this container, then writes `weekly_score` and leaderboard documents back into it.
 

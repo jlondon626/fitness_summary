@@ -12,7 +12,7 @@ load_dotenv()
 
 COMPETITIONS_CONTAINER_DEFAULT = "fitness_competitions"
 RAW_CONTAINER_DEFAULT = "fitness_raw"
-HEALTH_CONTAINER_DEFAULT = "fitness_raw"
+HEALTH_CONTAINER_DEFAULT = "apple-health-data"
 
 
 def _required_env(name: str) -> str:
@@ -77,7 +77,7 @@ def _health_container():
         "COSMOS_DB_HEALTH_CONTAINER_NAME",
         os.getenv("COSMOS_HEALTH_CONTAINER")
         or os.getenv("COSMOS_CONTAINER")
-        or _optional_env("COSMOS_DB_RAW_CONTAINER_NAME", HEALTH_CONTAINER_DEFAULT),
+        or HEALTH_CONTAINER_DEFAULT,
     )
     return _health_database().get_container_client(container_name)
 
