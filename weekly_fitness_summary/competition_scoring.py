@@ -276,6 +276,21 @@ def get_raw_records(user_id: str, week_start: date, week_end: date) -> list[dict
     )
 
 
+def get_latest_renpho_record_before(user_id: str, before_date: date) -> dict[str, Any] | None:
+    return _query_one(
+        _raw_container(),
+        (
+            "SELECT TOP 1 * FROM c WHERE c.type = 'renpho_daily' "
+            "AND c.userID = @userID AND c.date < @beforeDate "
+            "ORDER BY c.date DESC"
+        ),
+        [
+            {"name": "@userID", "value": user_id},
+            {"name": "@beforeDate", "value": before_date.isoformat()},
+        ],
+    )
+
+
 def get_apple_health_records(
     user_id: str,
     participant_id: str,
@@ -347,6 +362,7 @@ def build_weekly_metrics(
     *,
     challenge: dict[str, Any] | None = None,
     week_start: date | None = None,
+    start_weight_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     weigh_ins = sorted(
         [record for record in raw_records if record.get("type") == "renpho_daily"],
@@ -374,10 +390,22 @@ def build_weekly_metrics(
         and week_start == _challenge_start(challenge)
     )
 
-    if is_first_challenge_week and weights and average_bodyweight is not None and weights[0] != 0:
+    if (
+        is_first_challenge_week
+        and start_weight_record is not None
+        and start_weight_record.get("weightKg") is not None
+        and weights
+        and average_bodyweight is not None
+        and float(start_weight_record["weightKg"]) != 0
+    ):
+        weight_trend_start_weight = float(start_weight_record["weightKg"])
+        weight_trend_end_weight = average_bodyweight
+        weight_trend_method = "latest_pre_challenge_weigh_in_to_first_week_average"
+        weekly_weight_change_pct = (average_bodyweight - weight_trend_start_weight) / weight_trend_start_weight
+    elif is_first_challenge_week and weights and average_bodyweight is not None and weights[0] != 0:
         weight_trend_start_weight = weights[0]
         weight_trend_end_weight = average_bodyweight
-        weight_trend_method = "first_challenge_weigh_in_to_first_week_average"
+        weight_trend_method = "first_challenge_weigh_in_to_first_week_average_fallback"
         weekly_weight_change_pct = (average_bodyweight - weights[0]) / weights[0]
     elif len(weights) >= 2 and weights[0] != 0:
         weight_trend_start_weight = weights[0]
@@ -535,11 +563,18 @@ def explain_category(category_name: str, category_score: dict[str, Any], metrics
         if pct is None:
             return "Insufficient weigh-in data to calculate a weekly weight trend."
         direction = "Lost" if metric_value < 0 else "Gained" if metric_value > 0 else "Maintained"
-        if metrics.get("weightTrendMethod") == "first_challenge_weigh_in_to_first_week_average":
+        if metrics.get("weightTrendMethod") == "latest_pre_challenge_weigh_in_to_first_week_average":
             start_weight = _format_number(metrics.get("weightTrendStartWeightKg"), "kg")
             end_weight = _format_number(metrics.get("weightTrendEndWeightKg"), "kg")
             return (
-                f"{direction} {pct} bodyweight from challenge start weigh-in "
+                f"{direction} {pct} bodyweight from latest pre-challenge weigh-in "
+                f"({start_weight}) to first-week average ({end_weight})."
+            )
+        if metrics.get("weightTrendMethod") == "first_challenge_weigh_in_to_first_week_average_fallback":
+            start_weight = _format_number(metrics.get("weightTrendStartWeightKg"), "kg")
+            end_weight = _format_number(metrics.get("weightTrendEndWeightKg"), "kg")
+            return (
+                f"{direction} {pct} bodyweight from first available challenge-week weigh-in "
                 f"({start_weight}) to first-week average ({end_weight})."
             )
         return f"{direction} {pct} bodyweight."
@@ -974,8 +1009,15 @@ def build_weekly_score_document(
     week_start: date,
     week_end: date,
     raw_records: list[dict[str, Any]],
+    start_weight_record: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
-    metrics = build_weekly_metrics(participant, raw_records, challenge=challenge, week_start=week_start)
+    metrics = build_weekly_metrics(
+        participant,
+        raw_records,
+        challenge=challenge,
+        week_start=week_start,
+        start_weight_record=start_weight_record,
+    )
     category_scores = {
         category_name: score_category(category_name, category_rules, metrics)
         for category_name, category_rules in scoring_rules.get("categories", {}).items()
@@ -1041,7 +1083,8 @@ def score_week(
 
     saved_scores: list[dict[str, Any]] = []
     for participant in participants:
-        raw_records = get_raw_records(_participant_raw_user_id(participant), week_start, week_end)
+        raw_user_id = _participant_raw_user_id(participant)
+        raw_records = get_raw_records(raw_user_id, week_start, week_end)
         raw_records.extend(
             get_apple_health_records(
                 _participant_health_user_id(participant),
@@ -1050,6 +1093,10 @@ def score_week(
                 week_end,
             )
         )
+        start_weight_record = None
+        if week_start == _challenge_start(challenge):
+            start_weight_record = get_latest_renpho_record_before(raw_user_id, _challenge_start(challenge))
+
         score_document = build_weekly_score_document(
             challenge,
             participant,
@@ -1057,6 +1104,7 @@ def score_week(
             week_start,
             week_end,
             raw_records,
+            start_weight_record=start_weight_record,
         )
         saved_scores.append(competition_container.upsert_item(score_document))
 
@@ -1094,7 +1142,8 @@ def score_active_challenges(today: date | None = None) -> list[dict[str, Any]]:
         competition_container = _competitions_container()
 
         for participant in participants:
-            raw_records = get_raw_records(_participant_raw_user_id(participant), week_start, week_end)
+            raw_user_id = _participant_raw_user_id(participant)
+            raw_records = get_raw_records(raw_user_id, week_start, week_end)
             raw_records.extend(
                 get_apple_health_records(
                     _participant_health_user_id(participant),
@@ -1103,6 +1152,10 @@ def score_active_challenges(today: date | None = None) -> list[dict[str, Any]]:
                     week_end,
                 )
             )
+            start_weight_record = None
+            if week_start == _challenge_start(challenge):
+                start_weight_record = get_latest_renpho_record_before(raw_user_id, _challenge_start(challenge))
+
             score_document = build_weekly_score_document(
                 challenge,
                 participant,
@@ -1110,6 +1163,7 @@ def score_active_challenges(today: date | None = None) -> list[dict[str, Any]]:
                 week_start,
                 week_end,
                 raw_records,
+                start_weight_record=start_weight_record,
             )
             saved_scores.append(competition_container.upsert_item(score_document))
 

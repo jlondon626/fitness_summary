@@ -109,7 +109,7 @@ Apple Health rows are joined by participant `healthUserID`, `appleHealthUserID`,
 
 Weekly score documents include a presentation-friendly `points` summary, per-category `explanations`, `capsApplied`, and draft/publish fields. They also keep detailed `categoryScores`, `metrics`, and `scoringWarnings` for audit/debugging.
 
-For week one, `weightTrend` compares the earliest weigh-in in the challenge week with the rolling average weight across that first week. Later weeks use the first-to-last weigh-in change within that scored week. Score metrics include `weightTrendStartWeightKg`, `weightTrendEndWeightKg`, and `weightTrendMethod` so the frontend can explain the comparison.
+For week one, `weightTrend` compares the latest Renpho weigh-in before the challenge start date with the rolling average weight across the first challenge week. If no pre-challenge weigh-in exists, it falls back to the earliest weigh-in in the challenge week. Later weeks use the first-to-last weigh-in change within that scored week. Score metrics include `weightTrendStartWeightKg`, `weightTrendEndWeightKg`, and `weightTrendMethod` so the frontend can explain the comparison.
 
 After weekly scores are written, the scorer writes leaderboard documents by adding together existing weekly scores. It creates `leaderboard_week` and `leaderboard_month` documents on each scoring run, plus `leaderboard_final` once the scored period reaches the challenge end date. If a Sunday-start challenge also has a Sunday `endDate`, the final leaderboard becomes available after the Saturday scoring window immediately before that Sunday. Leaderboards keep `participantId` because they are competition outputs; raw fitness data remains keyed only by `userID`.
 
