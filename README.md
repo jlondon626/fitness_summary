@@ -109,6 +109,21 @@ Apple Health rows are joined by participant `healthUserID`, `appleHealthUserID`,
 
 Weekly score documents include a presentation-friendly `points` summary, per-category `explanations`, `capsApplied`, and draft/publish fields. They also keep detailed `categoryScores`, `metrics`, and `scoringWarnings` for audit/debugging.
 
+For ad hoc score checks without writing score or leaderboard documents, call the preview helpers:
+
+```powershell
+@'
+from datetime import date
+from weekly_fitness_summary.competition_scoring import preview_current_week_scores, preview_score_period
+
+for score in preview_current_week_scores():
+    print(score["displayName"], score["points"], score["metrics"])
+
+for score in preview_score_period(date(2026, 5, 10), date(2026, 5, 13)):
+    print(score["displayName"], score["totalPoints"])
+'@ | .\.venv\Scripts\python.exe -
+```
+
 For week one, `weightTrend` compares the latest Renpho weigh-in before the challenge start date with the rolling average weight across the first challenge week. If no pre-challenge weigh-in exists, it falls back to the earliest weigh-in in the challenge week. Later weeks use the first-to-last weigh-in change within that scored week. Score metrics include `weightTrendStartWeightKg`, `weightTrendEndWeightKg`, and `weightTrendMethod` so the frontend can explain the comparison.
 
 After weekly scores are written, the scorer writes leaderboard documents by adding together existing weekly scores. It creates `leaderboard_week` and `leaderboard_month` documents on each scoring run, plus `leaderboard_final` once the scored period reaches the challenge end date. If a Sunday-start challenge also has a Sunday `endDate`, the final leaderboard becomes available after the Saturday scoring window immediately before that Sunday. Leaderboards keep `participantId` because they are competition outputs; raw fitness data remains keyed only by `userID`.
@@ -279,6 +294,53 @@ The target values used in calculations are in:
 weekly_fitness_summary/constants.py
 ```
 
+## Stats API
+
+The React Native Stats tab can read precomputed challenge stats from:
+
+```http
+GET /api/challenges/{challengeID}/stats?period=week|month|challenge
+Authorization: Bearer <AUTH_TOKEN>
+```
+
+The bearer token is optional. If `AUTH_TOKEN`, `HEALTH_API_TOKEN`, or `FITNESS_API_TOKEN` is configured in the Function App, requests must send the matching `Authorization: Bearer ...` header.
+
+The endpoint returns the same stable shape for every period:
+
+```json
+{
+  "period": "week",
+  "participants": ["Ash", "Jack"],
+  "weightChangePct": [
+    { "label": "Sun", "Ash": 0, "Jack": 0 }
+  ],
+  "calorieAdherence": [
+    { "label": "Sun", "Ash": 180, "Jack": -90 }
+  ],
+  "foodLoggingDays": {
+    "Ash": 5,
+    "Jack": 3
+  },
+  "activeCalories": [
+    { "label": "Sun", "Ash": 420, "Jack": 510 }
+  ],
+  "weighInDays": {
+    "Ash": 5,
+    "Jack": 4
+  }
+}
+```
+
+Stats are stored in `fitness_competitions` as `type = "challenge_stats"` docs with ids like `challenge_stats__challenge_2026_05_04__week`. The stored document includes `periodStartDate`, `periodEndDate`, `generatedAt`, and a nested `stats` payload. The endpoint returns the nested `stats` object so the frontend can replace its dummy data directly.
+
+Period behavior:
+
+- `week`: current challenge week, using the challenge `weekStartsOn` setting.
+- `month`: current calendar month, clipped to the challenge date range.
+- `challenge`: challenge start date through today, or the challenge end date if the challenge has ended.
+
+For `week`, chart labels are day names such as `Sun` and `Mon`. For `month` and `challenge`, labels are weekly buckets such as `W1`, `W2`, and `W3`. Weight change is percentage change from the latest Renpho weigh-in before the period start, falling back to the first available period weigh-in. Calorie adherence is average kcal variance from `averageDailyCalorieTarget` for logged FatSecret days in the bucket. Active calories are summed from Apple Health/Fitness active calorie records.
+
 ## Local Setup
 
 ```powershell
@@ -309,6 +371,7 @@ The timer triggers are defined in `function_app.py`:
 ```python
 weekly_fitness_summary: "0 30 7 * * 0"
 sync_daily_fitness_raw: "0 45 23 * * *"
+refresh_daily_challenge_stats: "0 0 5 * * *"
 score_weekly_fitness_competition: "0 15 0 * * 0"
 weekly_competition_leaderboard_summary: "0 30 7 * * 0"
 monthly_competition_leaderboard_summary: "0 30 7 * * 0"
@@ -321,7 +384,7 @@ Azure timer expressions use six fields:
 second minute hour day month day-of-week
 ```
 
-The weekly summary and all three leaderboard timers run at `07:30 UTC` every Sunday, which is `08:30 BST` during the May-Aug UK daylight saving competition window. Raw sync runs daily at `23:45 UTC`. Competition scoring runs Sunday at `00:15 UTC` and scores the previous completed competition week. Leaderboard timers generate and store app messages in Cosmos; they do not post competition leaderboard messages to Telegram.
+The weekly summary and all three leaderboard timers run at `07:30 UTC` every Sunday, which is `08:30 BST` during the May-Aug UK daylight saving competition window. Raw sync runs daily at `23:45 UTC`. Challenge stats refresh runs daily at `05:00 UTC`, which is `06:00 BST` during the same challenge window. Competition scoring runs Sunday at `00:15 UTC` and scores the previous completed competition week. Leaderboard timers generate and store app messages in Cosmos; they do not post competition leaderboard messages to Telegram.
 
 The leaderboard timers are exclusive. They all wake up on Sunday, but only one sends a message:
 

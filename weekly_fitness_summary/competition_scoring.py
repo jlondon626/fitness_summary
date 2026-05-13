@@ -1059,6 +1059,80 @@ def build_weekly_score_document(
     }
 
 
+def build_score_documents_for_period(
+    challenge: dict[str, Any],
+    period_start: date,
+    period_end: date,
+) -> list[dict[str, Any]]:
+    scoring_rules = get_scoring_rules(challenge["challengeID"], challenge["scoringVersion"])
+    score_documents: list[dict[str, Any]] = []
+
+    for participant in get_challenge_participants(challenge):
+        raw_user_id = _participant_raw_user_id(participant)
+        raw_records = get_raw_records(raw_user_id, period_start, period_end)
+        raw_records.extend(
+            get_apple_health_records(
+                _participant_health_user_id(participant),
+                participant["participantId"],
+                period_start,
+                period_end,
+            )
+        )
+        start_weight_record = None
+        if period_start == _challenge_start(challenge):
+            start_weight_record = get_latest_renpho_record_before(raw_user_id, _challenge_start(challenge))
+
+        score_documents.append(
+            build_weekly_score_document(
+                challenge,
+                participant,
+                scoring_rules,
+                period_start,
+                period_end,
+                raw_records,
+                start_weight_record=start_weight_record,
+            )
+        )
+
+    return score_documents
+
+
+def preview_score_period(
+    period_start: date | None = None,
+    period_end: date | None = None,
+    *,
+    challenge_id: str | None = None,
+    today: date | None = None,
+) -> list[dict[str, Any]]:
+    """Build score documents for an ad hoc period without writing to Cosmos."""
+    challenge = get_active_challenge(challenge_id)
+    today = today or date.today()
+
+    if period_start is None:
+        if not _challenge_has_started(challenge, today):
+            return []
+        period_start = _week_start_for(today, challenge.get("weekStartsOn", "SUNDAY"))
+
+    if period_end is None:
+        period_end = today
+
+    if period_end < period_start:
+        raise ValueError("period_end must be on or after period_start.")
+
+    if period_end < _challenge_start(challenge):
+        return []
+
+    return build_score_documents_for_period(challenge, period_start, period_end)
+
+
+def preview_current_week_scores(
+    *,
+    challenge_id: str | None = None,
+    today: date | None = None,
+) -> list[dict[str, Any]]:
+    return preview_score_period(challenge_id=challenge_id, today=today)
+
+
 def score_week(
     week_start: date | None = None,
     *,
@@ -1077,35 +1151,10 @@ def score_week(
     if week_end < _challenge_start(challenge):
         return []
 
-    scoring_rules = get_scoring_rules(challenge["challengeID"], challenge["scoringVersion"])
-    participants = get_challenge_participants(challenge)
     competition_container = _competitions_container()
 
     saved_scores: list[dict[str, Any]] = []
-    for participant in participants:
-        raw_user_id = _participant_raw_user_id(participant)
-        raw_records = get_raw_records(raw_user_id, week_start, week_end)
-        raw_records.extend(
-            get_apple_health_records(
-                _participant_health_user_id(participant),
-                participant["participantId"],
-                week_start,
-                week_end,
-            )
-        )
-        start_weight_record = None
-        if week_start == _challenge_start(challenge):
-            start_weight_record = get_latest_renpho_record_before(raw_user_id, _challenge_start(challenge))
-
-        score_document = build_weekly_score_document(
-            challenge,
-            participant,
-            scoring_rules,
-            week_start,
-            week_end,
-            raw_records,
-            start_weight_record=start_weight_record,
-        )
+    for score_document in build_score_documents_for_period(challenge, week_start, week_end):
         saved_scores.append(competition_container.upsert_item(score_document))
 
     score_records_to_date = _merge_score_records(

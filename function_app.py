@@ -1,7 +1,13 @@
 import logging
+import json
+import os
 import azure.functions as func
 
 from weekly_fitness_summary.competition_scoring import score_active_challenges
+from weekly_fitness_summary.competition_stats import (
+    get_or_build_challenge_stats,
+    refresh_active_challenge_stats,
+)
 from weekly_fitness_summary.raw_fitness_sync import sync_daily_fitness_raw
 from weekly_fitness_summary.weekly_telegram_summary import (
     generate_competition_leaderboard_summary,
@@ -12,6 +18,35 @@ from weekly_fitness_summary.weekly_telegram_summary import (
 )
 
 app = func.FunctionApp()
+
+
+def _configured_auth_token() -> str | None:
+    return (
+        os.getenv("AUTH_TOKEN")
+        or os.getenv("HEALTH_API_TOKEN")
+        or os.getenv("FITNESS_API_TOKEN")
+    )
+
+
+def _is_authorized(req: func.HttpRequest) -> bool:
+    expected_token = _configured_auth_token()
+    if not expected_token:
+        return True
+
+    authorization = req.headers.get("Authorization", "")
+    prefix = "Bearer "
+    if not authorization.startswith(prefix):
+        return False
+    return authorization[len(prefix):].strip() == expected_token
+
+
+def _json_response(body: dict, status_code: int = 200) -> func.HttpResponse:
+    return func.HttpResponse(
+        json.dumps(body),
+        status_code=status_code,
+        mimetype="application/json",
+    )
+
 
 @app.function_name(name="weekly_fitness_summary")
 @app.timer_trigger(
@@ -43,6 +78,48 @@ def sync_daily_fitness_raw_timer(mytimer: func.TimerRequest) -> None:
     logging.info("Daily raw fitness sync timer triggered.")
     saved_documents = sync_daily_fitness_raw()
     logging.info("Daily raw fitness sync saved %s document(s).", len(saved_documents))
+
+
+@app.function_name(name="refresh_daily_challenge_stats")
+@app.timer_trigger(
+    schedule="0 0 5 * * *",  # 06:00 Europe/London during BST
+    arg_name="mytimer",
+    run_on_startup=False,
+    use_monitor=True,
+)
+def refresh_daily_challenge_stats_timer(mytimer: func.TimerRequest) -> None:
+    logging.info("Daily challenge stats refresh timer triggered.")
+    saved_documents = refresh_active_challenge_stats()
+    logging.info("Daily challenge stats refresh saved %s document(s).", len(saved_documents))
+
+
+@app.function_name(name="get_challenge_stats")
+@app.route(
+    route="challenges/{challengeID}/stats",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def get_challenge_stats(req: func.HttpRequest) -> func.HttpResponse:
+    if not _is_authorized(req):
+        return _json_response({"error": "Forbidden"}, status_code=403)
+
+    challenge_id = req.route_params.get("challengeID")
+    period = (req.params.get("period") or "week").strip().lower()
+
+    if not challenge_id:
+        return _json_response({"error": "Missing challengeID."}, status_code=400)
+
+    try:
+        stats = get_or_build_challenge_stats(challenge_id, period)
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status_code=404)
+    except Exception:
+        logging.exception("Failed to build challenge stats.")
+        return _json_response({"error": "Failed to build challenge stats."}, status_code=500)
+
+    return _json_response(stats)
 
 
 @app.function_name(name="score_weekly_fitness_competition")
