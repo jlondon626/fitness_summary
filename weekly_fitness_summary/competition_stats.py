@@ -47,21 +47,21 @@ def _period_bounds(challenge: dict[str, Any], period: str, today: date | None = 
     today = today or _today()
     challenge_start = _challenge_start(challenge)
     challenge_end = _challenge_end(challenge)
-    effective_today = min(today, challenge_end)
+    latest_completed_day = min(today - timedelta(days=1), challenge_end)
 
     if period == "week":
-        period_start = _week_start_for(effective_today, challenge.get("weekStartsOn", "SUNDAY"))
+        period_start = _week_start_for(latest_completed_day, challenge.get("weekStartsOn", "SUNDAY"))
         period_end = period_start + timedelta(days=6)
     elif period == "month":
-        period_start = effective_today.replace(day=1)
-        period_end = _month_end(effective_today)
+        period_start = latest_completed_day.replace(day=1)
+        period_end = _month_end(latest_completed_day)
     elif period == "challenge":
         period_start = challenge_start
         period_end = challenge_end
     else:
         raise ValueError(f"Invalid stats period: {period}")
 
-    return max(period_start, challenge_start), min(period_end, effective_today)
+    return max(period_start, challenge_start), min(period_end, latest_completed_day)
 
 
 def _date_range(start: date, end: date) -> list[date]:
@@ -301,7 +301,7 @@ def refresh_active_challenge_stats(today: date | None = None) -> list[dict[str, 
     saved_documents: list[dict[str, Any]] = []
     today = today or _today()
     for challenge in get_active_challenges():
-        if today < _challenge_start(challenge):
+        if today - timedelta(days=1) < _challenge_start(challenge):
             continue
         for period in ("week", "month", "challenge"):
             saved_documents.append(upsert_challenge_stats(challenge["challengeID"], period, today))

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import os
-from datetime import date, datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from typing import Any
 
 from azure.cosmos import CosmosClient
@@ -159,17 +159,57 @@ def get_raw_sync_users() -> list[dict[str, Any]]:
     return users
 
 
-def _measurement_date(measurement: dict[str, Any]) -> date | None:
+def _renpho_timezone(value: Any) -> timezone:
+    if not value:
+        return timezone.utc
+
+    text = str(value).strip()
+    if text.upper() in {"Z", "UTC"}:
+        return timezone.utc
+
+    sign = -1 if text.startswith("-") else 1
+    offset_text = text.lstrip("+-")
+    try:
+        hours_text, minutes_text = offset_text.split(":", 1)
+        offset = timedelta(hours=int(hours_text), minutes=int(minutes_text))
+    except ValueError:
+        try:
+            offset = timedelta(hours=int(offset_text))
+        except ValueError:
+            return timezone.utc
+
+    return timezone(sign * offset)
+
+
+def _measurement_datetime(measurement: dict[str, Any]) -> datetime | None:
+    timestamp = measurement.get("timeStamp")
+    if timestamp is not None:
+        try:
+            timestamp_seconds = float(timestamp)
+        except (TypeError, ValueError):
+            timestamp_seconds = None
+
+        if timestamp_seconds is not None:
+            if timestamp_seconds > 10_000_000_000:
+                timestamp_seconds = timestamp_seconds / 1000
+            measured_at_utc = datetime.fromtimestamp(timestamp_seconds, timezone.utc)
+            return measured_at_utc.astimezone(_renpho_timezone(measurement.get("timeZone")))
+
     local_created_at = measurement.get("localCreatedAt")
     if not local_created_at:
         return None
 
     for fmt in ("%Y-%m-%d    %H:%M:%S", "%Y-%m-%d %H:%M:%S"):
         try:
-            return datetime.strptime(local_created_at, fmt).date()
+            return datetime.strptime(local_created_at, fmt).replace(tzinfo=_renpho_timezone(measurement.get("timeZone")))
         except ValueError:
             continue
     return None
+
+
+def _measurement_date(measurement: dict[str, Any]) -> date | None:
+    measured_at = _measurement_datetime(measurement)
+    return measured_at.date() if measured_at else None
 
 
 def get_renpho_daily_measurement(selected_date: date, email: str, password: str) -> dict[str, Any] | None:
@@ -183,7 +223,10 @@ def get_renpho_daily_measurement(selected_date: date, email: str, password: str)
     if not measurements:
         return None
 
-    return max(measurements, key=lambda measurement: measurement.get("localCreatedAt", ""))
+    return max(
+        measurements,
+        key=lambda measurement: _measurement_datetime(measurement) or datetime.min.replace(tzinfo=timezone.utc),
+    )
 
 
 def build_renpho_daily_document(
@@ -194,6 +237,7 @@ def build_renpho_daily_document(
     synced_at: str | None = None,
 ) -> dict[str, Any]:
     user_slug = _user_slug(user_id)
+    measured_at = _measurement_datetime(measurement)
 
     return {
         "id": f"renpho__{user_slug}__{selected_date.isoformat()}",
@@ -203,6 +247,12 @@ def build_renpho_daily_document(
         "weightKg": float(measurement["weight"]),
         "bodyFatPct": float(measurement["bodyfat"]),
         "source": "renpho",
+        "measurementAt": measured_at.isoformat() if measured_at else None,
+        "sourceTimeStamp": measurement.get("timeStamp"),
+        "sourceSyncTimeStamp": measurement.get("syncTimeStamp"),
+        "sourceLocalCreatedAt": measurement.get("localCreatedAt"),
+        "sourceCreatedAt": measurement.get("createdAt"),
+        "sourceTimeZone": measurement.get("timeZone"),
         "syncedAt": synced_at or _synced_at(),
     }
 

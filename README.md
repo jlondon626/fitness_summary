@@ -95,7 +95,7 @@ For Azure, add the same values as Function App application settings. Azure will 
 
 `COSMOS_DB_AI_QUERY` is optional. Set it if your container needs a more specific query for the records you want the AI to see.
 
-`COSMOS_DB_RAW_CONTAINER_NAME` defaults to `fitness_raw`. The daily raw sync writes one Renpho document and one FatSecret document per user/date using deterministic ids such as `renpho__user_jack__2026-05-04` and `fatsecret__user_jack__2026-05-04`. Users to sync are read from `fitness_competitions` user documents with enabled Renpho/FatSecret sources, not from app settings.
+`COSMOS_DB_RAW_CONTAINER_NAME` defaults to `fitness_raw`. The daily raw sync writes one Renpho document and one FatSecret document per user/date using deterministic ids such as `renpho__user_jack__2026-05-04` and `fatsecret__user_jack__2026-05-04`. Renpho measurement dates are derived from the source `timeStamp` epoch value plus the measurement `timeZone`, falling back to `localCreatedAt` only if no usable timestamp exists. Users to sync are read from `fitness_competitions` user documents with enabled Renpho/FatSecret sources, not from app settings.
 
 `COSMOS_DB_HEALTH_CONTAINER_NAME` defaults to `apple-health-data`. If the Apple Health API uses a separate Cosmos account or database, set `COSMOS_DB_HEALTH_CONNECTION_STRING` and `COSMOS_DB_HEALTH_DATABASE_NAME`. The scorer also understands the Apple Health API names `COSMOS_ENDPOINT`, `COSMOS_KEY`, `COSMOS_DATABASE`, and `COSMOS_CONTAINER`. Competition scoring reads `type = "apple-health-data"` rows and maps positive `active_energy_kcal` values into the active-calorie score.
 
@@ -164,6 +164,15 @@ Competition AI messages are stored in the competition container as `leaderboard_
 ```
 
 The corresponding leaderboard document also gets `aiMessageId`, `aiMessageGeneratedAt`, `aiMessageStatus`, `aiMessage`, and `message` fields for simple frontend reads. Leaderboard documents include both `rankings` and `rows`; they contain the same ranked data so frontend code can use either naming convention.
+
+The app can preview ad hoc scores without writing `weekly_score`, leaderboard, or AI message documents:
+
+```http
+GET /api/challenges/{challengeID}/scores/preview?startDate=2026-05-10&endDate=2026-05-13
+Authorization: Bearer <AUTH_TOKEN>
+```
+
+If `startDate` is omitted, the endpoint previews the current challenge week through `today`. Optional aliases are `periodStart`/`periodEnd` and `from`/`to`; add `today=YYYY-MM-DD` for local/date-specific checks.
 
 ## Competition Data Model
 
@@ -333,11 +342,11 @@ The endpoint returns the same stable shape for every period:
 
 Stats are stored in `fitness_competitions` as `type = "challenge_stats"` docs with ids like `challenge_stats__challenge_2026_05_04__week`. The stored document includes `periodStartDate`, `periodEndDate`, `generatedAt`, and a nested `stats` payload. The endpoint returns the nested `stats` object so the frontend can replace its dummy data directly.
 
-Period behavior:
+Period behavior uses completed days only. A request or timer run on `today` includes data through yesterday, capped at the challenge end date:
 
 - `week`: current challenge week, using the challenge `weekStartsOn` setting.
 - `month`: current calendar month, clipped to the challenge date range.
-- `challenge`: challenge start date through today, or the challenge end date if the challenge has ended.
+- `challenge`: challenge start date through yesterday, or the challenge end date if the challenge has ended.
 
 For `week`, chart labels are day names such as `Sun` and `Mon`. For `month` and `challenge`, labels are weekly buckets such as `W1`, `W2`, and `W3`. Weight change is percentage change from the latest Renpho weigh-in before the period start, falling back to the first available period weigh-in. Calorie adherence is average kcal variance from `averageDailyCalorieTarget` for logged FatSecret days in the bucket. Active calories are summed from Apple Health/Fitness active calorie records.
 

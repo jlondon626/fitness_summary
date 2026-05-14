@@ -1,9 +1,10 @@
 import logging
 import json
 import os
+from datetime import datetime
 import azure.functions as func
 
-from weekly_fitness_summary.competition_scoring import score_active_challenges
+from weekly_fitness_summary.competition_scoring import preview_score_period, score_active_challenges
 from weekly_fitness_summary.competition_stats import (
     get_or_build_challenge_stats,
     refresh_active_challenge_stats,
@@ -46,6 +47,12 @@ def _json_response(body: dict, status_code: int = 200) -> func.HttpResponse:
         status_code=status_code,
         mimetype="application/json",
     )
+
+
+def _parse_query_date(value: str | None):
+    if not value:
+        return None
+    return datetime.strptime(value, "%Y-%m-%d").date()
 
 
 @app.function_name(name="weekly_fitness_summary")
@@ -120,6 +127,56 @@ def get_challenge_stats(req: func.HttpRequest) -> func.HttpResponse:
         return _json_response({"error": "Failed to build challenge stats."}, status_code=500)
 
     return _json_response(stats)
+
+
+@app.function_name(name="preview_competition_scores")
+@app.route(
+    route="challenges/{challengeID}/scores/preview",
+    methods=["GET"],
+    auth_level=func.AuthLevel.ANONYMOUS,
+)
+def preview_competition_scores(req: func.HttpRequest) -> func.HttpResponse:
+    if not _is_authorized(req):
+        return _json_response({"error": "Forbidden"}, status_code=403)
+
+    challenge_id = req.route_params.get("challengeID")
+    if not challenge_id:
+        return _json_response({"error": "Missing challengeID."}, status_code=400)
+
+    try:
+        period_start = _parse_query_date(
+            req.params.get("startDate")
+            or req.params.get("periodStart")
+            or req.params.get("from")
+        )
+        period_end = _parse_query_date(
+            req.params.get("endDate")
+            or req.params.get("periodEnd")
+            or req.params.get("to")
+        )
+        today = _parse_query_date(req.params.get("today"))
+        scores = preview_score_period(
+            period_start,
+            period_end,
+            challenge_id=challenge_id,
+            today=today,
+        )
+    except ValueError as exc:
+        return _json_response({"error": str(exc)}, status_code=400)
+    except RuntimeError as exc:
+        return _json_response({"error": str(exc)}, status_code=404)
+    except Exception:
+        logging.exception("Failed to preview competition scores.")
+        return _json_response({"error": "Failed to preview competition scores."}, status_code=500)
+
+    response = {
+        "challengeID": challenge_id,
+        "periodStartDate": scores[0]["weekStartDate"] if scores else period_start.isoformat() if period_start else None,
+        "periodEndDate": scores[0]["weekEndDate"] if scores else period_end.isoformat() if period_end else None,
+        "persisted": False,
+        "scores": scores,
+    }
+    return _json_response(response)
 
 
 @app.function_name(name="score_weekly_fitness_competition")
